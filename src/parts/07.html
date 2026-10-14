@@ -1,0 +1,467 @@
+/* =================== FEATURE PACK: reminders, weather, music, files, brief, Claude via API key =================== */
+Object.assign(P, {
+  bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  cloud: '<path d="M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 11 3.5 3.5 0 0 0 7 18z"/>',
+  music: '<path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
+  files: '<path d="M4 6h6l2 2h8v11H4z"/>',
+  connect: '<circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>'
+});
+S.settings = { apiKey: "", city: "", geo: null, ...S.settings };
+if (!Array.isArray(S.reminders)) S.reminders = [];
+ORDER.splice(ORDER.indexOf("settings"), 0, "connect");
+NAMES.connect = "Connect";
+const isFrameBlocked = e => e && (e.name === "TypeError" || /fetch|Load failed|NetworkError/i.test(e.message || ""));
+const fmtWhen = t => { const d = new Date(t), today = new Date().toDateString() === d.toDateString(); return (today ? "" : d.toLocaleDateString([], { weekday: "short" }) + " ") + hhmm(d); };
+
+/* ---------- Reminders and timers ---------- */
+const Rem = {
+  add(text, at) {
+    text = String(text || "").trim() || "Reminder"; at = Number(at);
+    if (!at || isNaN(at)) throw new Error("A reminder needs a time");
+    const r = { id: uid(), text, at, done: false };
+    S.reminders.push(r); S.reminders.sort((a, b) => a.at - b.at); S.reminders = S.reminders.filter(x => !x.done || x.at > Date.now() - DAY).slice(-50);
+    log(`Reminder set: ${text} at ${fmtWhen(at)}`); sfx("confirm"); changed(); return r;
+  },
+  remove(id) { S.reminders = S.reminders.filter(r => r.id !== id); changed(); },
+  upcoming() { return S.reminders.filter(r => !r.done).sort((a, b) => a.at - b.at); },
+  clockAt(h, m, ap) {
+    h = +h; m = +(m || 0);
+    if (ap) { ap = ap.toLowerCase(); if (ap === "pm" && h < 12) h += 12; if (ap === "am" && h === 12) h = 0; }
+    const d = new Date(); d.setHours(h, m, 0, 0);
+    if (d.getTime() <= Date.now()) { if (!ap && h < 12 && h + 12 > new Date().getHours()) d.setHours(h + 12); else d.setDate(d.getDate() + 1); }
+    return d.getTime();
+  },
+  span(n, unit) { unit = unit.toLowerCase(); const k = /^h/.test(unit) ? 3600e3 : /^s/.test(unit) ? 1e3 : 60e3; return Date.now() + Number(n) * k; },
+  parse(s) {
+    let m;
+    const U = "(seconds?|secs?|minutes?|mins?|hours?|hrs?)";
+    if ((m = s.match(new RegExp(`^set (?:a |an )?(?:timer|alarm) for (\\d+)\\s*${U}`, "i")))) return { text: "Timer done", at: this.span(m[1], m[2]) };
+    if ((m = s.match(new RegExp(`^remind me in (\\d+)\\s*${U}\\s*(?:to\\s+)?(.+)$`, "i")))) return { text: m[3], at: this.span(m[1], m[2]) };
+    if ((m = s.match(new RegExp(`^remind me (?:to\\s+)?(.+?) in (\\d+)\\s*${U}$`, "i")))) return { text: m[1], at: this.span(m[2], m[3]) };
+    if ((m = s.match(/^remind me at (\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*(?:to\s+)?(.+)$/i))) return { text: m[4], at: this.clockAt(m[1], m[2], m[3]) };
+    if ((m = s.match(/^remind me (?:to\s+)?(.+?) at (\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$/i))) return { text: m[1], at: this.clockAt(m[2], m[3], m[4]) };
+    if ((m = s.match(/^(?:set (?:an )?alarm|wake me) (?:for|at) (\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?/i))) return { text: "Alarm", at: this.clockAt(m[1], m[2], m[3]) };
+    return null;
+  },
+  check() {
+    const now = Date.now();
+    for (const r of S.reminders) if (!r.done && r.at <= now) this.fire(r);
+  },
+  fire(r) {
+    r.done = true; save();
+    sfx("alert"); try { navigator.vibrate?.([200, 100, 200]); } catch (e) {}
+    const line = r.text === "Timer done" ? `Your timer is done, ${addr()}.` : r.text === "Alarm" ? `${partOfDay()}, ${addr()}. This is your alarm.` : `${addr()}, a reminder: ${r.text}.`;
+    toast(line); setCaption(line, ""); say(line); log(`Reminder: ${r.text}`); notify(`${AN()} reminder`, r.text);
+    renderHome();
+  }
+};
+function notify(title, body) {
+  try {
+    if (!("Notification" in window) || Notification.permission !== "granted" || !document.hidden) return;
+    if (navigator.serviceWorker?.controller) navigator.serviceWorker.ready.then(reg => reg.showNotification(title, { body, icon: "icons/icon.svg", tag: "ozzy" })).catch(() => {});
+    else new Notification(title, { body });
+  } catch (e) {}
+}
+setInterval(() => Rem.check(), 2000);
+
+/* ---------- Weather (Open-Meteo, no key) ---------- */
+const WMO = { 0: "clear skies", 1: "mostly clear", 2: "partly cloudy", 3: "overcast", 45: "fog", 48: "freezing fog", 51: "light drizzle", 53: "drizzle", 55: "heavy drizzle", 56: "freezing drizzle", 57: "freezing drizzle", 61: "light rain", 63: "rain", 65: "heavy rain", 66: "freezing rain", 67: "freezing rain", 71: "light snow", 73: "snow", 75: "heavy snow", 77: "snow grains", 80: "light showers", 81: "showers", 82: "heavy showers", 85: "snow showers", 86: "heavy snow showers", 95: "thunderstorms", 96: "thunderstorms with hail", 99: "thunderstorms with hail" };
+const Weather = {
+  state: "idle", data: null, err: "", place: "",
+  async geocode(city) {
+    const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`);
+    const j = await r.json(); const g = j.results?.[0];
+    if (!g) throw new Error(`I couldn't find ${city}. Try a bigger nearby town.`);
+    return { lat: g.latitude, lon: g.longitude, name: [g.name, g.country_code].filter(Boolean).join(", ") };
+  },
+  locate() {
+    return new Promise((res, rej) => {
+      if (!navigator.geolocation) return rej(new Error("Location isn't available here. Set your city instead."));
+      navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lon: p.coords.longitude, name: "Your location" }), () => rej(new Error("Location is blocked. Set your city instead.")), { timeout: 10000, maximumAge: 1800e3 });
+    });
+  },
+  async load(opts = {}) {
+    this.state = "loading"; this.err = ""; renderHome();
+    try {
+      let g = S.settings.geo;
+      if (opts.city) { g = await this.geocode(opts.city); S.settings.city = opts.city; }
+      else if (opts.here) { g = await this.locate(); S.settings.city = ""; }
+      else if (!g && S.settings.city) g = await this.geocode(S.settings.city);
+      if (!g) { this.state = "nolocation"; renderHome(); return; }
+      S.settings.geo = g; save();
+      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${g.lat}&longitude=${g.lon}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&timezone=auto&forecast_days=3&wind_speed_unit=mph`);
+      if (!r.ok) throw new Error("The weather service didn't answer. Try again shortly.");
+      this.data = await r.json(); this.place = g.name; this.state = "ready";
+    } catch (e) {
+      this.state = isFrameBlocked(e) ? "blocked" : "error"; this.err = e.message || "Weather failed.";
+    }
+    renderHome(); wins.get("connect")?.inst.update();
+  },
+  summary() {
+    const d = this.data; if (!d) return null;
+    const c = d.current, dl = d.daily;
+    return { now: Math.round(c.temperature_2m), feels: Math.round(c.apparent_temperature), sky: WMO[c.weather_code] || "mixed conditions", wind: Math.round(c.wind_speed_10m), hi: Math.round(dl.temperature_2m_max[0]), lo: Math.round(dl.temperature_2m_min[0]), rain: dl.precipitation_probability_max[0] ?? 0, tomorrow: { hi: Math.round(dl.temperature_2m_max[1]), sky: WMO[dl.weather_code[1]] || "mixed", rain: dl.precipitation_probability_max[1] ?? 0 }, place: this.place };
+  },
+  spoken() {
+    const w = this.summary(); if (!w) return this.state === "blocked" ? "Weather works in the installed app, not inside Claude." : this.state === "nolocation" ? "Tell me your city in Connect and I'll fetch the weather." : this.err || "I don't have the weather yet.";
+    return `It's ${w.now} degrees and ${w.sky}${w.place && w.place !== "Your location" ? " in " + w.place.split(",")[0] : ""}. Today's high is ${w.hi}, low ${w.lo}, with a ${w.rain}% chance of rain.${w.rain >= 50 ? " I'd take an umbrella." : ""}`;
+  }
+};
+setInterval(() => { if (Weather.state === "ready") Weather.load(); }, 30 * 60e3);
+
+/* ---------- Connectors: Spotify and Google Drive (inside Claude) ---------- */
+const Conn = {
+  st: { Spotify: "idle", "Google Drive": "idle" }, err: {},
+  async call(server, tool, input) { if (!mcp) throw { code: "no_mcp" }; const r = await mcp.callTool(server, tool, input); return r.payload ?? r; },
+  errText(server, e) {
+    return ({
+      no_mcp: `${server} works inside Claude.`,
+      needs_reauth: `${server} needs you to sign in again. Reconnect it in claude.ai Settings, Connectors.`,
+      server_not_connected: `${server} isn't connected. Add it in claude.ai Settings, Connectors.`,
+      not_in_manifest: `${server} is off for this page. Press Connect to allow it.`,
+      approval_required: `${server} needs your approval. Press Connect.`,
+      server_unavailable: `${server} isn't answering. Try again shortly.`,
+      tool_error: `${server} refused: ${e?.message || "unknown reason"}`
+    })[e?.code] || `${server} request failed.`;
+  },
+  async boot() {
+    for (const s of ["Spotify", "Google Drive"]) {
+      if (!mcp) { this.st[s] = "unavailable"; continue; }
+      let st = "prompt"; try { st = perms ? await perms.state("mcp:" + s) : "prompt"; } catch (e) {}
+      this.st[s] = st === "granted" ? "ready" : "needs";
+    }
+    if (this.st["Google Drive"] === "ready") Files.recent();
+    renderHome();
+  },
+  fail(server, e) { this.st[server] = ["not_in_manifest", "approval_required"].includes(e?.code) ? "needs" : "error"; this.err[server] = this.errText(server, e); }
+};
+const deepStrings = (o, out = [], depth = 0) => { if (depth > 5 || o == null) return out; if (typeof o === "string") out.push(o); else if (typeof o === "object") for (const v of Object.values(o)) deepStrings(v, out, depth + 1); return out; };
+const firstUrl = (o, host) => deepStrings(o).find(s => /^https?:\/\//.test(s) && (!host || s.includes(host))) || "";
+const Music = {
+  text: "", link: "", busy: false,
+  describe(p) {
+    if (p == null) return "Nothing came back from Spotify.";
+    if (typeof p === "string") return p.replace(/\s+/g, " ").slice(0, 200);
+    if (p.is_playing === false || p.isPlaying === false) return "Nothing playing right now.";
+    const item = p.item || p.track || p.currently_playing || p.content || p;
+    const name = item.name || item.title || p.name || p.title;
+    const artists = (item.artists || p.artists || []).map(a => a?.name || a).filter(Boolean).join(", ") || item.artist || p.artist || item.show?.name || "";
+    if (name) return artists ? `${name} · ${artists}` : String(name);
+    const txt = deepStrings(p).filter(s => s.length > 3 && !/^https?:/.test(s)).slice(0, 3).join(" · ");
+    return txt.slice(0, 200) || "Spotify answered, but I couldn't read the track.";
+  },
+  async now() {
+    this.busy = true; renderHome();
+    try { const p = await Conn.call("Spotify", "get_currently_playing", {}); Conn.st.Spotify = "ready"; this.text = this.describe(p); this.link = firstUrl(p, "spotify.com"); }
+    catch (e) { Conn.fail("Spotify", e); this.text = Conn.err.Spotify; this.link = ""; }
+    this.busy = false; renderHome(); return this.text;
+  },
+  async playlist(desc) {
+    desc = String(desc || "").trim(); if (!desc) return "Tell me what the playlist is for.";
+    this.busy = true; this.text = "Building your playlist..."; renderHome();
+    try {
+      const p = await Conn.call("Spotify", "generate_playlist", { prompt: /^(create|make|generate|build)\b/i.test(desc) ? desc : `Create a playlist: ${desc}`, language: "en-GB" });
+      Conn.st.Spotify = "ready"; this.link = firstUrl(p, "spotify"); this.text = this.link ? `Playlist ready: ${desc}` : this.describe(p);
+      log(`Playlist made: ${desc}`); sfx("confirm");
+    } catch (e) { Conn.fail("Spotify", e); this.text = Conn.err.Spotify; this.link = ""; }
+    this.busy = false; renderHome(); return this.text;
+  }
+};
+const MIME = { "application/vnd.google-apps.document": "Doc", "application/vnd.google-apps.spreadsheet": "Sheet", "application/vnd.google-apps.presentation": "Slides", "application/vnd.google-apps.folder": "Folder", "application/pdf": "PDF" };
+const Files = {
+  list: [], q: "", busy: false,
+  map: p => (p?.files || []).map(f => ({ id: f.id, title: f.title || f.name || "Untitled", kind: MIME[f.mimeType] || (f.mimeType || "").split("/").pop()?.toUpperCase() || "File", url: f.viewUrl || f.webViewLink || "", at: f.modifiedTime })),
+  async recent() {
+    this.busy = true; this.q = ""; renderHome();
+    try { this.list = this.map(await Conn.call("Google Drive", "list_recent_files", { pageSize: 5, excludeContentSnippets: true })); Conn.st["Google Drive"] = "ready"; }
+    catch (e) { Conn.fail("Google Drive", e); }
+    this.busy = false; renderHome(); return this.list;
+  },
+  async search(q) {
+    q = String(q || "").trim(); if (!q) return this.recent();
+    this.busy = true; this.q = q; renderHome();
+    const term = q.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    try { this.list = this.map(await Conn.call("Google Drive", "search_files", { query: `title contains '${term}' or fullText contains '${term}'`, pageSize: 8, excludeContentSnippets: true })); Conn.st["Google Drive"] = "ready"; }
+    catch (e) { Conn.fail("Google Drive", e); }
+    this.busy = false; renderHome(); return this.list;
+  }
+};
+
+/* ---------- Daily brief ---------- */
+function briefLines() {
+  const lines = [`${partOfDay()}, ${addr()}. It's ${hhmm(Date.now())} on ${new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}.`];
+  if (Weather.state === "ready") lines.push(Weather.spoken());
+  if (Mail.state === "ready") lines.push(Mail.unread ? `You have ${Mail.unread} unread email${Mail.unread === 1 ? "" : "s"}${Mail.unreadList[0] ? `, the latest from ${Mail.unreadList[0].from}` : ""}.` : "Your inbox is clear.");
+  const today = Rem.upcoming().filter(r => r.at < startOfDay(Date.now()) + DAY);
+  lines.push(today.length ? `On today's list: ${today.slice(0, 3).map(r => `${r.text} at ${hhmm(r.at)}`).join(", ")}.` : "No reminders for the rest of today.");
+  const wk = weekMinutes(); if (wk) lines.push(`You've logged ${wk} focus minutes this week.`);
+  return lines;
+}
+
+/* ---------- Assistant upgrades: tools, local commands, state ---------- */
+const baseTools = Ozzy.tools.bind(Ozzy), baseRules = Ozzy.rules.bind(Ozzy), baseLocal = Ozzy.local.bind(Ozzy), baseSend = Ozzy.send.bind(Ozzy);
+Ozzy.rules = function () {
+  return baseRules() + `
+Extra state (JSON): ${JSON.stringify({ reminders: Rem.upcoming().slice(0, 8).map(r => ({ id: r.id, text: r.text, at: new Date(r.at).toString().slice(0, 21) })), weather: Weather.summary() || Weather.state, spotify: Conn.st.Spotify, drive: Conn.st["Google Drive"] })}
+You can also set reminders and timers, read the weather, check and build Spotify music, and find Google Drive files. For "brief me" or "good morning", give a short spoken daily brief from the state and tools.`;
+};
+Ozzy.tools = function () {
+  const note = t => { S.chat.push({ role: "note", content: t }); wins.get("log")?.inst.update(); };
+  return [...baseTools(),
+    { name: "add_reminder", description: "Set a reminder or timer. Give minutes_from_now for timers, or at_time as 24-hour HH:MM for a clock time (today, or tomorrow if passed).", inputSchema: { type: "object", properties: { text: { type: "string" }, minutes_from_now: { type: "number" }, at_time: { type: "string" } }, required: ["text"] },
+      execute: i => { let at = 0; if (i.minutes_from_now) at = Date.now() + Number(i.minutes_from_now) * 60e3; else if (i.at_time) { const [h, m] = String(i.at_time).split(":"); at = Rem.clockAt(h, m); } const r = Rem.add(i.text, at); note(`› reminder: ${r.text} at ${fmtWhen(r.at)}`); return { set_for: new Date(r.at).toString().slice(0, 21) }; } },
+    { name: "cancel_reminder", description: "Cancel a reminder by its id from the state.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+      execute: i => { Rem.remove(String(i.id)); note("› reminder cancelled"); return "cancelled"; } },
+    { name: "get_weather", description: "Get current weather and the 3-day outlook for the user's saved location.", inputSchema: { type: "object", properties: {} },
+      execute: async () => { if (Weather.state !== "ready") await Weather.load(); return Weather.summary() || Weather.spoken(); } },
+    { name: "now_playing", description: "What is playing on the user's Spotify right now.", inputSchema: { type: "object", properties: {} },
+      execute: async () => { note("› checked Spotify"); return await Music.now(); } },
+    { name: "make_playlist", description: "Create a private Spotify playlist from a description of mood, genre, artists or activity.", inputSchema: { type: "object", properties: { description: { type: "string" } }, required: ["description"] },
+      execute: async i => { note("› building playlist"); return await Music.playlist(i.description); } },
+    { name: "find_files", description: "Search the user's Google Drive by keywords. Returns titles, types and links.", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      execute: async i => { note("› searched Drive"); const l = await Files.search(i.query); return l.length ? l.map(f => ({ title: f.title, type: f.kind, modified: f.at })) : (Conn.err["Google Drive"] || "No matching files."); } }
+  ];
+};
+Ozzy.local = async function (text) {
+  const s = text.trim().replace(/[.!?]+$/, ""), a = addr(); let out = null, r;
+  try {
+    if (/^(?:brief me|briefing|daily brief|morning brief|good morning|what'?s my day)/i.test(s)) { if (Weather.state === "idle" && (S.settings.geo || S.settings.city)) await Weather.load(); out = briefLines().join(" "); }
+    else if ((r = Rem.parse(s))) { const x = Rem.add(r.text, r.at); out = x.text === "Timer done" ? `Timer set for ${fmtWhen(x.at)}, ${a}.` : `I'll remind you at ${fmtWhen(x.at)}: ${x.text}.`; }
+    else if (/^(?:what are my |list |show )?reminders/i.test(s)) { const u = Rem.upcoming(); out = u.length ? `You have ${u.length} reminder${u.length === 1 ? "" : "s"}. Next: ${u[0].text} at ${fmtWhen(u[0].at)}.` : "No reminders set."; }
+    else if (/^(?:cancel|clear|delete) (?:all )?reminders/i.test(s)) { S.reminders = []; changed(); out = "All reminders cleared."; }
+    else if (/weather|temperature|is it (?:going to )?rain|umbrella/i.test(s)) { if (Weather.state !== "ready") await Weather.load(); out = Weather.spoken(); }
+    else if (/^(?:what'?s|what is) (?:playing|this song)|now playing/i.test(s)) out = await Music.now();
+    else if ((r = s.match(/^(?:make|create|build|generate) (?:me )?(?:a )?playlist(?: for| of| with)?\s*(.*)$/i))) out = await Music.playlist(r[1] || "my favourite songs");
+    else if ((r = s.match(/^(?:find|search|open) (?:my )?(?:file|doc|document|sheet|spreadsheet)s?\s*(?:called|named|about)?\s*(.+)$/i))) { const l = await Files.search(r[1]); out = l.length ? `Found ${l.length} in Drive. Top match: ${l[0].title}.` : (Conn.err["Google Drive"] || `Nothing in Drive matches ${r[1]}.`); }
+  } catch (e) { out = e.message || "That didn't work."; }
+  if (out != null) { this.reply(out); return; }
+  return baseLocal(text);
+};
+
+/* ---------- Claude through your own API key (installed app) ---------- */
+const API = {
+  url: "https://api.anthropic.com/v1/messages",
+  effort: () => ({ quick: "low", default: "medium", complex: "high" })[S.settings.tier] || "low",
+  async post(body, signal, withFallback) {
+    const headers = { "content-type": "application/json", "x-api-key": S.settings.apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" };
+    if (withFallback) { headers["anthropic-beta"] = "server-side-fallback-2026-07-01"; body = { ...body, fallbacks: "default" }; }
+    const res = await fetch(this.url, { method: "POST", signal, headers, body: JSON.stringify(body) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (withFallback && res.status === 400 && /fallback/i.test(j?.error?.message || "")) return this.post(body, signal, false);
+      throw { code: res.status === 401 || res.status === 403 ? "bad_key" : res.status === 429 ? "rate_limited" : res.status >= 500 ? "overloaded" : "api_error", message: j?.error?.message || `HTTP ${res.status}` };
+    }
+    return j;
+  },
+  async chat(turns, onText, signal) {
+    const prev = aiTools; aiTools = true; const system = Ozzy.rules(); aiTools = prev;
+    const tools = Ozzy.tools(), map = Object.fromEntries(tools.map(t => [t.name, t]));
+    const defs = tools.map(t => ({ name: t.name, description: t.description, input_schema: t.inputSchema || { type: "object", properties: {} } }));
+    const messages = turns.slice(); let all = "";
+    for (let round = 0; round < 6; round++) {
+      const j = await this.post({ model: "claude-opus-5-5", max_tokens: 16000, system, messages, tools: defs, output_config: { effort: this.effort() } }, signal, true);
+      if (j.stop_reason === "refusal") return all || "I can't help with that one. Try different wording.";
+      messages.push({ role: "assistant", content: j.content });
+      const text = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+      if (text) { all = all ? all + "\n\n" + text : text; onText(all, text); }
+      if (j.stop_reason !== "tool_use") return all;
+      const uses = j.content.filter(b => b.type === "tool_use");
+      const results = await Promise.all(uses.map(async u => {
+        const t = map[u.name];
+        try { if (!t) throw new Error("Unknown tool"); const out = await t.execute(u.input || {}, { signal }); return { type: "tool_result", tool_use_id: u.id, content: typeof out === "string" ? out : JSON.stringify(out) }; }
+        catch (e) { return { type: "tool_result", tool_use_id: u.id, content: String(e?.message || e), is_error: true }; }
+      }));
+      messages.push({ role: "user", content: results });
+    }
+    return all || "That took more steps than I allow. Try a simpler request.";
+  },
+  errText(e) {
+    return ({ bad_key: "Your Anthropic API key was rejected. Check it in Connect.", rate_limited: "The API is rate limiting us. Give it a minute.", overloaded: "Claude is busy right now. Try again shortly." })[e?.code] || (e?.name === "AbortError" ? "Standing down." : isFrameBlocked(e) ? "This page blocks direct API calls. Use the installed app." : "The request failed: " + (e?.message || "unknown error"));
+  }
+};
+Ozzy.send = async function (text) {
+  if (sample || !S.settings.apiKey.trim()) return baseSend(text);
+  text = String(text || "").trim(); if (!text || this.busy) return;
+  hush(); pauseWake(); sfx("blip");
+  S.chat.push({ role: "user", content: text }); setCaption("", text); wins.get("log")?.inst.update();
+  const pending = { role: "assistant", content: "" }; S.chat.push(pending);
+  this.busy = true; this.ctl = new AbortController(); setOrb();
+  const hist = S.chat.filter(m => (m.role === "user" || m.role === "assistant") && m !== pending && m.content).slice(-14);
+  while (hist.length && hist[0].role !== "user") hist.shift();
+  const turns = []; for (const m of hist) { const last = turns[turns.length - 1]; if (last && last.role === m.role) last.content += "\n\n" + m.content; else turns.push({ role: m.role, content: m.content }); }
+  try {
+    const out = await API.chat(turns, (all, chunk) => { pending.content = all; setCaption(all, ""); wins.get("log")?.inst.update(); say(chunk); }, this.ctl.signal);
+    pending.content = out.trim(); setCaption(pending.content, "");
+  } catch (e) { pending.content = API.errText(e); setCaption(pending.content, ""); if (e?.name !== "AbortError") say(pending.content); }
+  S.chat = S.chat.filter(m => m.content).slice(-60); this.busy = false; this.ctl = null; setOrb(); save(); wins.get("log")?.inst.update();
+  if (!speaking && !utterCount) resumeWake();
+};
+function setAI(state) {
+  if (state === "offline" && S.settings.apiKey.trim()) state = "key";
+  aiState = state; aiChip.dataset.state = state === "key" ? "ready" : state;
+  $(".txt", aiChip).textContent = { connecting: "Linking", ready: "Claude linked", key: "Claude via key", offline: "Local mode", off: "Claude off" }[state];
+  aiChip.title = { connecting: "Looking for Claude", ready: "The assistant runs on Claude, on your own account", key: "The assistant runs on Claude through your own API key", offline: "No Claude here. Add an API key in Connect, or use built-in commands.", off: "Claude access was declined. Built-in commands still work." }[state];
+  for (const w of wins.values()) w.inst?.ai?.();
+  renderHome();
+}
+const baseMailBoot = Mail.boot.bind(Mail);
+Mail.boot = async function () { await baseMailBoot(); Conn.boot(); };
+
+/* ---------- Connect app: brain, services, location, notifications ---------- */
+APPS.connect = { name: "Connect", code: "LNK-07", w: 480, h: 620, mount(body) {
+  let status = "";
+  function update() {
+    const st = S.settings, inClaude = !!sample, key = st.apiKey.trim();
+    const svc = n => ({ ready: ["ok", "Linked"], needs: ["wait", "Not linked"], error: ["no", "Error"], unavailable: ["wait", "Inside Claude only"], idle: ["wait", "Checking"] })[Conn.st[n] || Mail.state] || ["wait", "Unknown"];
+    const gm = ({ ready: ["ok", "Linked"], needs: ["wait", "Not linked"], denied: ["no", "Blocked"], error: ["no", "Error"], unavailable: ["wait", "Inside Claude only"], loading: ["wait", "Syncing"], idle: ["wait", "Checking"] })[Mail.state];
+    const notif = !("Notification" in window) ? "Not supported here" : Notification.permission === "granted" ? "On" : Notification.permission === "denied" ? "Blocked" : "Off";
+    body.innerHTML = `<div class="pad set-grid">
+      <div class="set-row"><span class="label">Brain</span>
+        <ul class="checks"><li>Running on <b class="${inClaude || key ? "ok" : "wait"}">${inClaude ? "Claude in this page" : key ? "Your API key" : "Built-in commands"}</b></li></ul>
+        <span class="hint">${inClaude ? "Inside Claude, the assistant uses your Claude account. No key needed here." : "The installed app has no Claude account. Paste an Anthropic API key to give it the full brain. Get one at console.anthropic.com. Calls bill to your Anthropic account, so set a monthly spend limit there."}</span>
+        <form class="row" data-form="key" style="gap:6px"><input class="field" id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-..." value="${esc(st.apiKey)}" style="flex:1;min-width:200px" aria-label="Anthropic API key"><button class="btn primary sm" type="submit">Save</button>${key ? `<button class="btn ghost sm" type="button" data-act="clear-key">Remove</button>` : ""}</form>
+        <div class="row"><button class="btn sm" data-act="test-key" ${key && !inClaude ? "" : "disabled"}>Test the key</button><span class="hint">The key stays in this browser only. Anyone using this phone could use it.</span></div>
+        ${status ? `<div class="${status.startsWith("!") ? "err" : "ai-out"}">${esc(status.replace(/^!/, ""))}</div>` : ""}</div>
+      <div class="set-row"><span class="label">Services</span><ul class="checks">
+        <li>Gmail <b class="${gm[0]}">${gm[1]}</b></li>
+        <li>Spotify <b class="${svc("Spotify")[0]}">${svc("Spotify")[1]}</b></li>
+        <li>Google Drive <b class="${svc("Google Drive")[0]}">${svc("Google Drive")[1]}</b></li></ul>
+        <div class="row">${mcp ? `<button class="btn sm" data-act="link-gmail">Connect Gmail</button><button class="btn sm" data-act="link-spotify">Connect Spotify</button><button class="btn sm" data-act="link-drive">Connect Drive</button>` : `<span class="hint">These connect through your Claude connectors, so they work when you open ${esc(AN())} inside Claude.</span>`}</div>
+        ${Conn.err.Spotify ? `<span class="hint">${esc(Conn.err.Spotify)}</span>` : ""}</div>
+      <div class="set-row"><span class="label">Weather location</span>
+        <form class="row" data-form="city" style="gap:6px"><input class="field" id="cityIn" placeholder="Your town or city" value="${esc(st.city)}" style="flex:1;min-width:160px" aria-label="City"><button class="btn primary sm" type="submit">Set</button><button class="btn sm" type="button" data-act="here">Use my location</button></form>
+        <span class="hint">${Weather.state === "ready" ? `Showing ${esc(Weather.place)}.` : Weather.state === "blocked" ? "Claude's page blocks the weather service. It works in the installed app." : esc(Weather.err || "Set a city to see the weather.")}</span></div>
+      <div class="set-row"><span class="label">Notifications</span><div class="row"><span class="chip">${notif}</span><button class="btn sm" data-act="notif" ${notif === "Off" ? "" : "disabled"}>Allow notifications</button></div>
+        <span class="hint">Reminders always speak and chime while the app is open. Notifications also alert you when it's in the background, on iPhone only after you add it to your Home Screen.</span></div>
+      <div class="set-row"><span class="label">Installed app</span><div class="row"><a class="btn sm" href="${esc(st.appUrl)}" target="_blank" rel="noopener">${ico("ext", 13)} Open ${esc(st.appUrl.replace(/^https:\/\//, ""))}</a></div></div>
+    </div>`;
+  }
+  body.addEventListener("submit", async e => {
+    e.preventDefault();
+    if (e.target.dataset.form === "key") { S.settings.apiKey = $("#apiKey", body).value.trim(); save(); status = S.settings.apiKey ? "Key saved. Press Test the key." : "Key removed."; setAI(sample ? "ready" : "offline"); update(); }
+    if (e.target.dataset.form === "city") { const c = $("#cityIn", body).value.trim(); if (c) { await Weather.load({ city: c }); update(); } }
+  });
+  body.addEventListener("click", async e => {
+    const b = e.target.closest("[data-act]"); if (!b) return;
+    const act = b.dataset.act;
+    if (act === "clear-key") { S.settings.apiKey = ""; save(); status = "Key removed."; setAI(sample ? "ready" : "offline"); update(); }
+    if (act === "test-key") { status = "TESTING..."; update(); try { const j = await API.post({ model: "claude-opus-5-5", max_tokens: 200, messages: [{ role: "user", content: `Reply with one short sentence greeting ${addr()} as their assistant ${AN()}.` }], output_config: { effort: "low" } }, undefined, false); const t = (j.content || []).filter(x => x.type === "text").map(x => x.text).join(" ").trim(); status = t || "The key works."; say(status); } catch (err) { status = "!" + API.errText(err); } update(); }
+    if (act === "here") { await Weather.load({ here: true }); update(); }
+    if (act === "notif") { try { await Notification.requestPermission(); } catch (err) {} update(); }
+    if (act === "link-gmail") { await Mail.load(); update(); }
+    if (act === "link-spotify") { await Music.now(); update(); }
+    if (act === "link-drive") { await Files.recent(); update(); }
+  });
+  update();
+  return { update, ai: update };
+} };
+
+/* ---------- Home screen with the new panels ---------- */
+function renderHome() {
+  const L = $("#colL"), R = $("#colR"); if (!L) return;
+  let mailBody;
+  if (Mail.state === "unavailable") mailBody = `<div class="hint">Email reading works inside Claude, where your Gmail connector lives.</div>`;
+  else if (Mail.state === "needs" || Mail.state === "denied") mailBody = `<div class="empty">Link your Gmail so ${esc(AN())} reads your inbox.<button class="btn primary" data-act="mail-connect">${ico("mail", 15)} Connect Gmail</button></div>`;
+  else if (Mail.state === "error") mailBody = `<div class="err">${esc(Mail.error)}</div><button class="btn sm" data-act="mail-connect">${ico("refresh", 13)} Retry</button>`;
+  else if (Mail.unread == null) mailBody = `<div class="hint">Scanning inbox...</div>`;
+  else mailBody = `<div class="big">${Mail.unread}<small>UNREAD</small></div>${S.settings.accounts.length ? `<dl class="readout">${S.settings.accounts.map(a => `<dt style="text-transform:none;overflow:hidden;text-overflow:ellipsis">${esc(a)}</dt><dd>${Mail.acctCounts[a] ?? "–"}</dd>`).join("")}</dl>` : ""}${Mail.unreadList.length ? `<ul class="rows">${Mail.unreadList.slice(0, 3).map(t => `<li class="unread"><button data-thread="${esc(t.id)}"><b>${esc(t.from)}</b><span>${esc(t.subject)}</span></button></li>`).join("")}</ul>` : `<div class="hint">Inbox clear.</div>`}`;
+  const favs = S.contacts.slice(0, 6);
+  const msgBody = favs.length ? `<div class="contact-row">${favs.map(c => `<button class="contact-pill" data-text="${c.id}"><span class="avatar">${esc(initials(c.name))}</span>${esc(c.name)}</button>`).join("")}</div>`
+    : `<div class="empty">No contacts yet.<button class="btn" data-open="messages">${ico("plus", 15)} Add contact</button></div>`;
+  const sp = Conn.st.Spotify;
+  const musicBody = sp === "unavailable" ? `<div class="hint">Spotify works inside Claude, through your Spotify connector.</div>`
+    : `${Music.text ? `<div style="font-size:15px">${esc(Music.text)}</div>` : `<div class="hint">${sp === "ready" ? "Ask what's playing, or build a playlist." : "Link Spotify to see what's playing and build playlists."}</div>`}
+      ${Music.link ? `<a class="btn ghost sm" href="${esc(Music.link)}" target="_blank" rel="noopener">${ico("ext", 13)} Open in Spotify</a>` : ""}
+      <div class="row"><button class="btn sm" data-act="music-now" ${Music.busy ? "disabled" : ""}>${ico("music", 13)} What's playing</button></div>
+      <form class="row" data-form="playlist" style="gap:4px"><input class="field" id="plIn" placeholder="Playlist for... gym, focus, a road trip" style="flex:1;min-width:0;padding:4px 8px;font-size:14px" aria-label="Playlist description"><button class="btn primary sm" type="submit" ${Music.busy ? "disabled" : ""}>Make</button></form>`;
+  const dr = Conn.st["Google Drive"];
+  const filesBody = dr === "unavailable" ? `<div class="hint">Drive works inside Claude, through your Google Drive connector.</div>`
+    : dr === "needs" ? `<div class="empty">Link Google Drive to find your files by voice.<button class="btn primary sm" data-act="files-connect">${ico("files", 13)} Connect Drive</button></div>`
+    : dr === "error" ? `<div class="err">${esc(Conn.err["Google Drive"] || "Drive failed.")}</div><button class="btn sm" data-act="files-connect">Retry</button>`
+    : `<form class="row" data-form="files" style="gap:4px"><input class="field" id="fileQ" placeholder="Search Drive" value="${esc(Files.q)}" style="flex:1;min-width:0;padding:4px 8px;font-size:14px" aria-label="Search Drive"><button class="btn sm" type="submit">Find</button></form>
+       ${Files.busy ? `<div class="hint">Searching...</div>` : Files.list.length ? `<ul class="rows">${Files.list.slice(0, 5).map(f => `<li><a href="${esc(f.url)}" target="_blank" rel="noopener"><b>${esc(f.title)}</b><span>${esc(f.kind)}${f.at ? " · " + esc(shortDate(f.at)) : ""}</span></a></li>`).join("")}</ul>` : `<div class="hint">${Files.q ? "No matches." : "Press Find to list recent files."}</div>`}`;
+  L.innerHTML = `
+    <section class="widget"><div class="w-head"><span class="label">${ico("mail", 14)} Mail</span><button class="btn ghost sm" data-open="mail">Open</button></div>${mailBody}</section>
+    <section class="widget"><div class="w-head"><span class="label">${ico("messages", 14)} Messages</span><button class="btn ghost sm" data-open="messages">Open</button></div>${msgBody}</section>
+    <section class="widget"><div class="w-head"><span class="label">${ico("music", 14)} Music</span></div>${musicBody}</section>
+    <section class="widget"><div class="w-head"><span class="label">${ico("files", 14)} Files</span></div>${filesBody}</section>`;
+  const w = Weather.summary();
+  const weatherBody = w ? `<div class="mini-ring" style="gap:12px"><div class="big">${w.now}°<small>${esc(w.sky.toUpperCase())}</small></div></div>
+      <dl class="readout"><dt>FEELS LIKE</dt><dd>${w.feels}°</dd><dt>HIGH / LOW</dt><dd>${w.hi}° / ${w.lo}°</dd><dt>RAIN</dt><dd>${w.rain}%</dd><dt>WIND</dt><dd>${w.wind} MPH</dd><dt>TOMORROW</dt><dd>${w.tomorrow.hi}° ${esc(w.tomorrow.sky.toUpperCase())}</dd></dl>
+      <div class="hint">${esc(w.place)}</div>`
+    : Weather.state === "loading" ? `<div class="hint">Reading the sky...</div>`
+    : Weather.state === "blocked" ? `<div class="hint">Claude's page blocks the weather service. It works in the installed app.</div>`
+    : `<form class="row" data-form="city" style="gap:4px"><input class="field" id="cityHome" placeholder="Your town or city" style="flex:1;min-width:0;padding:4px 8px;font-size:14px" aria-label="City"><button class="btn primary sm" type="submit">Set</button></form><button class="btn ghost sm" data-act="weather-here">Use my location</button>${Weather.err ? `<div class="hint">${esc(Weather.err)}</div>` : ""}`;
+  const up = Rem.upcoming();
+  const remBody = `${up.length ? `<ul class="rows">${up.slice(0, 4).map(r => `<li style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px"><button data-act="rem-say" data-id="${r.id}"><b>${esc(r.text)}</b><span class="mono">${esc(fmtWhen(r.at))}</span></button><button class="icon-btn" data-act="rem-del" data-id="${r.id}" aria-label="Cancel reminder">${ico("close", 13)}</button></li>`).join("")}</ul>` : `<div class="hint">Nothing set. Say "remind me in 20 minutes to stretch".</div>`}
+      <form class="row" data-form="rem" style="gap:4px"><input class="field" id="remIn" placeholder="Remind me at 6pm to call Mum" style="flex:1;min-width:0;padding:4px 8px;font-size:14px" aria-label="New reminder"><button class="btn primary sm" type="submit">Add</button></form>`;
+  const f = S.focus, rs = remainingSec(), C = 2 * Math.PI * 26;
+  const brain = aiState === "ready" ? "CLAUDE" : aiState === "key" ? "API KEY" : aiState === "connecting" ? "SEEKING" : "LOCAL";
+  R.innerHTML = `
+    <section class="widget"><div class="w-head"><span class="label">${ico("cloud", 14)} Weather</span>${w ? `<button class="btn ghost sm" data-act="weather-refresh">${ico("refresh", 12)}</button>` : ""}</div>${weatherBody}</section>
+    <section class="widget"><div class="w-head"><span class="label">${ico("bell", 14)} Reminders</span><span class="hint">${up.length || ""}</span></div>${remBody}</section>
+    <section class="widget"><div class="w-head"><span class="label">${ico("focus", 14)} Focus</span><button class="btn ghost sm" data-open="focus">Open</button></div>
+      <div class="mini-ring"><svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="26" fill="none" stroke="var(--line)" stroke-width="4"/><circle cx="30" cy="30" r="26" fill="none" stroke="var(--accent)" stroke-width="4" stroke-dasharray="${C}" stroke-dashoffset="${(C * (1 - rs / (f.length * 60))).toFixed(1)}"/></svg>
+        <div><div class="big mono" id="wFocusT" style="font-size:28px">${fmt(rs)}</div><div class="hint">${weekMinutes()} min this week</div></div></div>
+      <div class="row"><button class="btn primary sm" data-act="focus-go">${f.running ? "Pause" : ico("bolt", 13) + " Engage"}</button>${[15, 25, 50].map(m => `<button class="btn sm" data-len="${m}" ${f.running ? "disabled" : ""}>${m}m</button>`).join("")}</div></section>
+    <section class="widget"><div class="w-head"><span class="label">System</span><span class="big" id="wTime" style="font-size:20px">${hhmm(Date.now())}</span></div>
+      <dl class="readout">
+        <dt>BRAIN</dt><dd class="${brain === "LOCAL" || brain === "SEEKING" ? "" : "on"}">${brain}</dd>
+        <dt>GMAIL</dt><dd class="${Mail.state === "ready" ? "on" : ""}">${{ ready: "LINKED", loading: "SYNCING", needs: "NOT LINKED", denied: "BLOCKED", error: "FAULT", unavailable: "CLAUDE ONLY", idle: "STANDBY" }[Mail.state]}</dd>
+        <dt>VOICE</dt><dd class="${S.settings.voice ? "on" : ""}">${S.settings.voice ? (studioOn() ? "STUDIO" : (PRESETS[S.settings.preset]?.label || "ON").toUpperCase()) : "MUTED"}</dd>
+        <dt>MICROPHONE</dt><dd class="${Mic.state === "granted" ? "on" : ""}">${MIC_LABEL[Mic.state].toUpperCase()}</dd>
+        <dt>WAKE WORD</dt><dd class="${wakeActive ? "on" : ""}">${S.settings.wake ? (wakeActive ? "LISTENING" : "PAUSED") : "OFF"}</dd>
+      </dl><button class="btn ghost sm" data-open="connect">${ico("connect", 13)} Connect services</button></section>`;
+  $("#micHint").innerHTML = Mic.ok() ? "" : `<div class="mic-hint">${ico("micoff", 15)}<span>Microphone ${esc(MIC_LABEL[Mic.state].toLowerCase())}. Typing still works.</span><button class="btn sm" data-open="mic">Fix it</button></div>`;
+  $("#chips").innerHTML = ["Brief me", "Check my email", "Remind me in 20 minutes to stretch", "What's the weather", S.contacts[0] ? `Text ${S.contacts[0].name} I'm on my way` : "Add a contact"]
+    .map(s => `<button type="button">${esc(s)}</button>`).join("");
+}
+$("#home").addEventListener("submit", async e => {
+  e.preventDefault();
+  const form = e.target.dataset.form;
+  if (form === "playlist") { const v = $("#plIn").value.trim(); if (v) { const t = await Music.playlist(v); say(t); } }
+  if (form === "files") Files.search($("#fileQ").value);
+  if (form === "city") { const v = $("#cityHome").value.trim(); if (v) Weather.load({ city: v }); }
+  if (form === "rem") {
+    const v = $("#remIn").value.trim(); if (!v) return;
+    const r = Rem.parse(/^remind|^set|^wake/i.test(v) ? v : "remind me " + v) || Rem.parse("remind me in 30 minutes to " + v.replace(/^to\s+/i, ""));
+    try { const x = Rem.add(r.text, r.at); toast(`Reminder set for ${fmtWhen(x.at)}.`); } catch (err) { toast(err.message); }
+  }
+});
+$("#home").addEventListener("click", e => {
+  const a = e.target.closest("[data-act]"); if (!a) return;
+  const act = a.dataset.act;
+  if (act === "music-now") Music.now().then(t => say(t));
+  if (act === "files-connect") Files.recent();
+  if (act === "weather-here") Weather.load({ here: true });
+  if (act === "weather-refresh") Weather.load();
+  if (act === "rem-del") { Rem.remove(a.dataset.id); sfx("close"); }
+  if (act === "rem-say") { const r = S.reminders.find(x => x.id === a.dataset.id); if (r) say(`${r.text}, at ${fmtWhen(r.at)}.`); }
+});
+
+/* ---------- Greeting on first interaction (audio needs a gesture) ---------- */
+let greeted = false;
+document.addEventListener("pointerdown", e => {
+  audio(); if (greeted) return; greeted = true;
+  resumeWake();
+  if (!S.settings.greet || e.target.closest("#micBig, #coreHit, #brand")) return;
+  sfx("boot");
+  setTimeout(() => {
+    if (speaking || listening || Ozzy.busy) return;
+    const parts = [`${partOfDay()}, ${addr()}. ${AN()} online.`];
+    if (Weather.state === "ready") { const w = Weather.summary(); parts.push(`It's ${w.now} degrees and ${w.sky}.`); }
+    if (Mail.state === "ready") parts.push(`You have ${Mail.unread || "no"} unread email${Mail.unread === 1 ? "" : "s"}.`);
+    const next = Rem.upcoming()[0]; if (next && next.at < Date.now() + 6 * 3600e3) parts.push(`Next up: ${next.text} at ${hhmm(next.at)}.`);
+    parts.push("How may I help?");
+    const line = parts.join(" "); setCaption(line, ""); say(line);
+  }, 700);
+}, { capture: true });
+
+/* ---------- Boot ---------- */
+readColors(); applySettings(); renderHome(); renderDock(); renderTop(); tick(); Mic.check(); Rem.check();
+setCaption(`${partOfDay()}, ${addr()}. Tap the core or the mic and speak, or type below.`, "");
+requestAnimationFrame(() => { drawWall(); setOrb(); requestAnimationFrame(loop); });
+document.fonts?.ready.then(() => drawWall());
+if (S.settings.geo || S.settings.city) Weather.load();
+})();
+</script>
