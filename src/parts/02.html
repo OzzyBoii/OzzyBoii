@@ -1,0 +1,309 @@
+.msg.assistant { align-self: flex-start; padding: 2px 0 2px 12px; border-left: 2px solid var(--accent); font-size: 16px; }
+.msg.assistant::before { content: attr(data-who); display: block; font-family: var(--font-mono); font-size: 10px; letter-spacing: .2em; color: var(--accent); }
+.msg.note { align-self: flex-start; font-size: 11px; color: var(--accent-2); font-family: var(--font-mono); letter-spacing: .1em; text-transform: uppercase; padding-left: 14px; }
+
+/* Microphone */
+.mic-hero { display: flex; align-items: center; gap: 16px; }
+.mic-badge { width: 76px; height: 76px; border-radius: 50%; display: grid; place-items: center; flex: none; border: 2px solid var(--muted); color: var(--muted); }
+.mic-badge svg.i { width: 32px; height: 32px; }
+.mic-badge[data-s="granted"] { border-color: var(--ok); color: var(--ok); box-shadow: 0 0 22px color-mix(in srgb, var(--ok) 35%, transparent); }
+.mic-badge[data-s="prompt"], .mic-badge[data-s="unknown"] { border-color: var(--warn); color: var(--warn); }
+.mic-badge[data-s="denied"], .mic-badge[data-s="blocked"], .mic-badge[data-s="nodevice"], .mic-badge[data-s="unsupported"] { border-color: var(--bad); color: var(--bad); }
+.meter { height: 12px; border: 1px solid var(--line); background: rgb(0 0 0 / .3); position: relative; overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 0; background: linear-gradient(90deg, var(--ok), var(--accent)); box-shadow: 0 0 10px var(--ok); transition: width .06s linear; }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.checks li { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; border-left: 2px solid var(--line); padding: 4px 10px; }
+.checks li b { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; font-weight: 400; text-transform: uppercase; }
+.checks li b.ok { color: var(--ok); } .checks li b.no { color: var(--bad); } .checks li b.wait { color: var(--warn); }
+.mic-hint { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); padding: 4px 4px 4px 10px; }
+.chip.mic-off { border-color: var(--bad); color: var(--bad); }
+.chip.mic-on { border-color: var(--ok); color: var(--ok); }
+
+/* Settings */
+.set-grid { display: grid; gap: 16px; }
+.set-row { display: grid; gap: 7px; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.toggle input, input[type="checkbox"] { accent-color: var(--accent); }
+.swatch { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: none; padding: 4px 10px 4px 5px; border-radius: 2px; font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; }
+.swatch i { width: 16px; height: 16px; display: block; border-radius: 50%; }
+.swatch[aria-pressed="true"] { border-color: var(--accent); box-shadow: var(--glow); }
+
+/* Launcher and toasts */
+.palette { position: fixed; inset: 0; z-index: 9000; background: var(--scrim); display: flex; justify-content: center; align-items: flex-start;
+  padding: 12vh max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px)); }
+.pal-box { width: 100%; max-width: 560px; background: var(--surface-solid); border: 1px solid var(--line-strong); box-shadow: var(--shadow), var(--glow); }
+.pal-box input { width: 100%; border: 0; border-bottom: 1px solid var(--line); padding: 14px 16px; font-size: 18px; background: none; outline: none; }
+.pal-list { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow: auto; }
+.pal-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer; border-left: 2px solid transparent; }
+.pal-list li[aria-selected="true"] { background: var(--surface-2); border-left-color: var(--accent); color: var(--accent); }
+.pal-list li .k { margin-left: auto; font-family: var(--font-mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.toasts { position: fixed; z-index: 9500; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(84px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 8px; justify-items: end; pointer-events: none; }
+.toast { background: var(--surface-solid); color: var(--ink); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent); padding: 8px 14px; font-size: 14px; box-shadow: var(--shadow); max-width: min(380px, calc(100vw - 32px)); pointer-events: auto; }
+
+@media (max-width: 1100px) {
+  .home { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .center { grid-column: 1 / -1; order: -1; }
+}
+@media (max-width: 720px) {
+  .home { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .core-wrap { width: min(78%, 300px); }
+  .core-name { font-size: 20px; }
+  .caption { font-size: 16px; min-height: 40px; }
+  .win { left: 0 !important; top: 0 !important; width: 100% !important; height: 100% !important; min-width: 0; }
+  .win-resize, .win-ctl [data-act="max"], .win-bar .code { display: none; }
+  .search-btn span, .search-btn kbd, .clock, .brand-name { display: none; }
+  .search-btn { flex: none; padding: 6px; }
+  .dock button { min-width: 44px; padding: 0 2px; }
+  .dock button .dl { display: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .win.opening { animation: holo .28s ease-out; }
+  @keyframes holo { 0% { opacity: 0; transform: scaleY(.04); filter: brightness(2); } 60% { opacity: 1; transform: scaleY(1.02); } 100% { transform: none; filter: none; } }
+}
+</style>
+
+<div id="os">
+  <canvas id="wall" aria-hidden="true"></canvas>
+  <header class="topbar">
+    <button class="brand" id="brand" aria-label="Talk to the assistant"><canvas class="core-mini" id="coreMini" width="60" height="60"></canvas><span class="brand-name" id="brandName">OZZY OS</span></button>
+    <button class="search-btn" id="searchBtn"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>Command, app or question</span><kbd>Ctrl K</kbd></button>
+    <div class="spacer"></div>
+    <button class="chip" id="micChip" hidden></button>
+    <button class="chip wake" id="wakeChip" hidden></button>
+    <button class="chip timer" id="timerChip" hidden></button>
+    <button class="chip" id="aiChip" data-state="connecting"><span class="dot"></span><span class="txt">Linking</span></button>
+    <button class="icon-btn" id="voiceBtn" aria-label="Voice replies"></button>
+    <div class="clock" id="clock"></div>
+  </header>
+  <main class="stage" id="stage">
+    <div class="home" id="home">
+      <div class="col" id="colL"></div>
+      <section class="center" aria-label="Assistant">
+        <div class="core-wrap"><canvas id="core" aria-hidden="true"></canvas><button class="core-hit" id="coreHit" aria-label="Talk"></button></div>
+        <div class="core-name" id="coreName">OZZY</div>
+        <div class="core-state" id="coreState">Standing by</div>
+        <div class="caption" id="caption" aria-live="polite"></div>
+        <form class="cmd" id="cmd"><button type="button" class="mic-big" id="micBig" aria-label="Speak a command"></button><input id="cmdIn" autocomplete="off" placeholder="Speak or type a command" aria-label="Command"><button type="submit" class="btn primary" id="cmdSend" aria-label="Send"></button></form>
+        <div id="micHint"></div>
+        <div class="chips" id="chips"></div>
+      </section>
+      <div class="col" id="colR"></div>
+    </div>
+  </main>
+  <div class="dock-wrap"><nav class="dock" id="dock" aria-label="Dock"></nav></div>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+(() => {
+"use strict";
+
+/* ---------- Icons and helpers ---------- */
+const P = {
+  home: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.2"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M3.5 6l8.5 7 8.5-7"/>',
+  messages: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>',
+  notes: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h5"/>',
+  focus: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/>',
+  log: '<path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  min: '<path d="M5 12h14"/>',
+  max: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
+  send: '<path d="M4 12l16-8-6 16-2.5-6.5z"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  stop: '<rect x="7" y="7" width="10" height="10" rx="1"/>',
+  bolt: '<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  speaker: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
+  mute: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l5 6M22 9l-5 6"/>',
+  phone: '<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2z"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>',
+  ext: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v6H4V6h6"/>',
+  pen: '<path d="M4 20l4-1 11-11-3-3L5 16z"/>',
+  micoff: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M3 3l18 18"/>'
+};
+const ico = (n, s) => `<svg class="i" viewBox="0 0 24 24"${s ? ` style="width:${s}px;height:${s}px"` : ""}>${P[n]}</svg>`;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const $ = (sel, root = document) => root.querySelector(sel);
+const uid = () => Math.random().toString(36).slice(2, 9);
+const DAY = 86400000;
+const startOfDay = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const hhmm = t => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const decoder = document.createElement("textarea");
+const decode = s => { decoder.innerHTML = String(s ?? ""); return decoder.value; };
+const initials = n => String(n || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "?";
+const cleanNum = n => String(n || "").trim().replace(/(?!^\+)[^\d]/g, "");
+const shortDate = iso => { const d = new Date(iso); if (isNaN(d)) return ""; return new Date().toDateString() === d.toDateString() ? hhmm(d) : d.toLocaleDateString([], { month: "short", day: "numeric" }); };
+const senderName = s => { s = decode(s || ""); const m = s.match(/^\s*"?([^"<]+?)"?\s*<.+>$/); return (m ? m[1] : s).trim(); };
+const senderAddr = s => { s = decode(s || ""); const m = s.match(/<([^>]+)>/); return (m ? m[1] : s).trim(); };
+const validEmail = a => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a);
+
+/* ---------- State ---------- */
+const KEY = "ozzy-os-v1";
+const now = Date.now();
+const SEED = {
+  notes: [
+    { id: uid(), title: "Welcome aboard", body: "Your assistant lives in the middle of the home screen. Tap the core or the mic and speak, or type a command.\n\nTry saying:\n- Check my email\n- Read my latest email\n- Text Mum I'm on my way\n- Start a 25 minute focus session\n\nTurn on Wake word in Settings, then say the assistant's name followed by a command.", at: now - 3600e3 }
+  ],
+  contacts: [],
+  sessions: [],
+  log: [{ t: now - 3600e3, text: "Systems initialized" }],
+  chat: [],
+  settings: { accent: "arc", tier: "quick", voice: true, voiceName: "", preset: "natural", sounds: true, greet: true, address: "sir", name: "", aname: "Ozzy", wake: false, myNumber: "", accounts: [], acct: "all", studioKey: "", studioVoice: "george", studioVoiceId: "", appUrl: "https://ozzyboii.github.io/OzzyBoii/", voiceV2: true },
+  focus: { length: 25, remaining: 25 * 60, running: false, endAt: 0 }
+};
+function load() {
+  try { const raw = localStorage.getItem(KEY); if (raw) { const s = JSON.parse(raw); delete s.tasks; return { ...structuredClone(SEED), ...s, settings: { ...SEED.settings, ...s.settings }, focus: { ...SEED.focus, ...s.focus } }; } } catch (e) {}
+  return structuredClone(SEED);
+}
+const S = load();
+if (!["arc", "mark", "stealth"].includes(S.settings.accent)) S.settings.accent = "arc";
+if (!Array.isArray(S.contacts)) S.contacts = [];
+if (!Array.isArray(S.settings.accounts)) S.settings.accounts = [];
+if (!S.settings.voiceV2) { S.settings.voiceV2 = true; S.settings.preset = "natural"; }
+S.chat = (S.chat || []).filter(m => m.content).slice(-40);
+const wins = new Map();
+let saveT;
+function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }, 150); }
+function log(text) { S.log.unshift({ t: Date.now(), text }); S.log = S.log.slice(0, 60); }
+function changed(except) { save(); for (const w of wins.values()) if (w.inst?.update && w.inst !== except) w.inst.update(); renderHome(); renderDock(); renderTop(); }
+const addr = () => S.settings.address === "custom" ? (S.settings.name.trim() || "Sir") : ({ sir: "Sir", maam: "Ma'am", boss: "Boss" }[S.settings.address] || "Sir");
+const AN = () => (S.settings.aname || "Ozzy").trim() || "Ozzy";
+const partOfDay = () => { const h = new Date().getHours(); return h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; };
+
+/* ---------- Sound effects ---------- */
+let ac = null;
+function audio() { try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === "suspended") ac.resume(); } catch (e) { ac = null; } return ac; }
+function tone(f1, f2, dur, delay = 0, type = "sine", vol = .06) {
+  const a = audio(); if (!a) return;
+  const t = a.currentTime + delay, o = a.createOscillator(), g = a.createGain();
+  o.type = type; o.frequency.setValueAtTime(f1, t); o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + .01); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + .02);
+}
+function sfx(kind) {
+  if (!S.settings.sounds) return;
+  ({
+    open: () => { tone(520, 1240, .14, 0, "sine", .05); tone(1800, 2400, .06, .08, "triangle", .02); },
+    close: () => tone(1100, 380, .14, 0, "sine", .045),
+    blip: () => tone(1500, 1700, .05, 0, "triangle", .035),
+    confirm: () => { tone(880, 880, .07, 0, "sine", .05); tone(1320, 1320, .1, .08, "sine", .05); },
+    listen: () => { tone(660, 990, .1, 0, "sine", .05); tone(990, 1480, .12, .1, "sine", .05); },
+    stopListen: () => tone(990, 520, .12, 0, "sine", .045),
+    wake: () => { tone(1200, 1800, .08, 0, "sine", .05); tone(1800, 2400, .08, .08, "sine", .04); },
+    speak: () => tone(2600, 2200, .04, 0, "sine", .015),
+    alert: () => { [0, .3, .6].forEach(d => { tone(880, 880, .18, d, "square", .03); tone(1320, 1320, .12, d + .14, "square", .025); }); },
+    boot: () => { tone(110, 440, .9, 0, "sawtooth", .02); tone(440, 880, .5, .5, "sine", .04); tone(1320, 1760, .3, .9, "sine", .03); }
+  })[kind]?.();
+}
+
+/* ---------- Voice out ---------- */
+const synth = window.speechSynthesis || null;
+const PRESETS = { natural: { rate: 1, pitch: 1, label: "Natural" }, butler: { rate: .95, pitch: .96, label: "Butler" }, calm: { rate: .9, pitch: .94, label: "Calm" }, brisk: { rate: 1.1, pitch: 1, label: "Brisk" } };
+const STUDIO = { george: { id: "JBFqnCBsd6RMkjVDRZzb", label: "George · warm British" }, daniel: { id: "onwK4e9ZLuTAKqWW03F9", label: "Daniel · deep British" }, custom: { id: "", label: "My own voice ID" } };
+let voices = [], speaking = false, speakLevel = 0, utterCount = 0;
+function loadVoices() { try { voices = synth ? synth.getVoices().filter(v => /^en/i.test(v.lang)) : []; } catch (e) { voices = []; } wins.get("settings")?.inst.update(); }
+if (synth) { loadVoices(); synth.addEventListener?.("voiceschanged", loadVoices); }
+const NOVELTY = /Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Wobble|Zarvox|Trinoids|Whisper|Albert|Jester|Organ|Superstar|Grandpa|Grandma|Eddy|Flo|Reed|Rocko|Sandy|Shelley|Junior|Ralph|Fred|Kathy|Princess|Hysterical|Deranged|Pipe|Good News/i;
+function voiceScore(v) {
+  let s = 0;
+  if (/en[-_]GB/i.test(v.lang)) s += 6;
+  if (/Premium|Neural|Natural/i.test(v.name)) s += 12;
+  else if (/Enhanced|Online|Siri/i.test(v.name)) s += 9;
+  if (/Daniel|Arthur|George|Ryan|Thomas|Oliver|Malcolm|Harry|Jamie|Alfie|Noah|UK English Male|Brian/i.test(v.name)) s += 4;
+  if (/female|Martha|Kate|Serena|Stephanie|Libby|Sonia|Hazel|Susan|Catherine|Moira|Karen|Tessa|Samantha|Fiona/i.test(v.name)) s -= 3;
+  if (NOVELTY.test(v.name)) s -= 20;
+  if (v.localService === false) s += 1;
+  return s;
+}
+function pickVoice() {
+  if (!voices.length) return null;
+  const chosen = voices.find(v => v.name === S.settings.voiceName); if (chosen) return chosen;
+  return [...voices].sort((a, b) => voiceScore(b) - voiceScore(a))[0];
+}
+const speakable = t => String(t).replace(/^\s*[-*•]\s+/gm, "").replace(/[*_#`>›]/g, "").replace(/\b(\d{1,2}):(\d{2})\b/g, "$1 $2").replace(/\be\.g\./gi, "for example").replace(/\bi\.e\./gi, "that is").replace(/&/g, " and ").replace(/\n+/g, ". ").replace(/\.\s*\./g, ".").replace(/\s{2,}/g, " ").trim();
+const sentences = t => (speakable(t).match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || []).map(x => x.trim()).filter(Boolean);
+let studioFailed = false, studioChain = Promise.resolve(), studioAudio = null, studioCtl = null;
+const studioVoiceId = () => S.settings.studioVoice === "custom" ? S.settings.studioVoiceId.trim() : (STUDIO[S.settings.studioVoice] || STUDIO.george).id;
+const studioOn = () => !!S.settings.studioKey.trim() && !!studioVoiceId() && !studioFailed;
+async function studioFetch(text, signal) {
+  const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(studioVoiceId())}?output_format=mp3_44100_128`, {
+    method: "POST", signal, headers: { "xi-api-key": S.settings.studioKey.trim(), "Content-Type": "application/json", Accept: "audio/mpeg" },
+    body: JSON.stringify({ text, model_id: "eleven_flash_v2_5", voice_settings: { stability: .45, similarity_boost: .8, style: .2, use_speaker_boost: true } })
+  });
+  if (!r.ok) { const err = new Error(r.status === 401 ? "Studio voice key rejected" : r.status === 429 ? "Studio voice quota reached" : "Studio voice error " + r.status); err.status = r.status; throw err; }
+  return r.blob();
+}
+function studioSay(text, onDone) {
+  const ctl = studioCtl || (studioCtl = new AbortController());
+  const pending = studioFetch(speakable(text), ctl.signal);
+  utterCount++;
+  studioChain = studioChain.then(async () => {
+    let blob;
+    try { blob = await pending; }
+    catch (e) {
+      if (e.name !== "AbortError") {
+        if (e.status === 401 || e.status === 429 || e.name === "TypeError") { studioFailed = true; toast(e.name === "TypeError" ? "Studio voice is blocked on this page. It works in the installed app. Using your device voice here." : e.message + ". Using your device voice."); }
+        utterCount = Math.max(0, utterCount - 1); deviceSay(text, onDone); return;
+      }
+      utterCount = Math.max(0, utterCount - 1); return;
+    }
+    if (ctl.signal.aborted) { utterCount = Math.max(0, utterCount - 1); return; }
+    await new Promise(res => {
+      const url = URL.createObjectURL(blob), el = new Audio(url); studioAudio = el;
+      const a = audio(); let an = null, buf = null, raf = 0;
+      try { if (a) { const src = a.createMediaElementSource(el); an = a.createAnalyser(); an.fftSize = 256; buf = new Uint8Array(an.fftSize); src.connect(an); an.connect(a.destination); } } catch (e) { an = null; }
+      const meter = () => { if (!an) return; an.getByteTimeDomainData(buf); let sum = 0; for (const v of buf) { const d = (v - 128) / 128; sum += d * d; } speakLevel = Math.max(speakLevel, Math.min(1, Math.sqrt(sum / buf.length) * 5)); raf = requestAnimationFrame(meter); };
+      const fin = () => { cancelAnimationFrame(raf); URL.revokeObjectURL(url); if (studioAudio === el) studioAudio = null; utterCount = Math.max(0, utterCount - 1); if (!utterCount) { speaking = false; setOrb(); afterSpeech(); } onDone?.(); res(); };
+      el.onplay = () => { speaking = true; setOrb(); meter(); };
+      el.onended = el.onerror = fin;
+      ctl.signal.addEventListener("abort", () => { el.pause(); fin(); }, { once: true });
+      el.play().catch(fin);
+    });
+  });
+}
+function say(text, onDone) {
+  if (!S.settings.voice || !String(text || "").trim()) { onDone?.(); return; }
+  pauseWake();
+  if (studioOn()) { studioSay(text, onDone); return; }
+  deviceSay(text, onDone);
+}
+function deviceSay(text, onDone) {
+  if (!synth) { onDone?.(); return; }
+  const parts = sentences(text); if (!parts.length) { onDone?.(); return; }
+  parts.forEach((part, i) => speakOne(part, i === parts.length - 1 ? onDone : null));
+}
+function speakOne(text, onDone) {
+  const u = new SpeechSynthesisUtterance(text);
+  const v = pickVoice(); if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-GB";
+  const p = PRESETS[S.settings.preset] || PRESETS.butler;
+  u.rate = p.rate; u.pitch = p.pitch;
+  utterCount++;
+  u.onstart = () => { speaking = true; setOrb(); };
+  u.onboundary = () => { speakLevel = 1; };
+  u.onend = u.onerror = () => { utterCount = Math.max(0, utterCount - 1); if (!utterCount) { speaking = false; setOrb(); afterSpeech(); } onDone?.(); };
+  try { synth.speak(u); } catch (e) { utterCount--; onDone?.(); }
+}
+function hush() { if (synth) try { synth.cancel(); } catch (e) {} if (studioCtl) { studioCtl.abort(); studioCtl = null; } studioChain = Promise.resolve(); utterCount = 0; speaking = false; setOrb(); }
+let afterSpeechHook = null;
+function afterSpeech() { const f = afterSpeechHook; afterSpeechHook = null; if (f) f(); else resumeWake(); }
+
+/* ---------- Voice in: commands and wake word ---------- */
+const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false, micBlocked = false, wakeRec = null, wakeActive = false;
+const MIC_LABEL = { unknown: "Checking", prompt: "Not asked yet", granted: "Ready", denied: "Denied", blocked: "Blocked by this page", unsupported: "Not supported", nodevice: "No microphone found" };
+const Mic = {
+  state: "unknown", level: 0, testing: false,
+  framed: (() => { try { return window.self !== window.top; } catch (e) { return true; } })(),
+  isIOS: /iPhone|iPad/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1),
+  ok() { return this.state === "granted" || this.state === "prompt" || this.state === "unknown"; },
+  policy() { try { const p = document.permissionsPolicy || document.featurePolicy; if (p?.allowsFeature) return p.allowsFeature("microphone"); } catch (e) {} return null; },
+  async check() {
+    if (!navigator.mediaDevices?.getUserMedia) this.state = "unsupported";
+    else if (this.policy() === false) this.state = "blocked";
+    else {
+      try { const r = await navigator.permissions?.query({ name: "microphone" }); if (r) { this.state = r.state; r.onchange = () => { this.state = r.state; this.ui(); }; } else this.state = "prompt"; }
