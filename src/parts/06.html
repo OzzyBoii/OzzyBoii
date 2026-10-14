@@ -1,0 +1,250 @@
+      : "Click the lock or tune icon left of the web address, set Microphone to Allow, then reload the page. On a Mac, also check System Settings, Privacy and Security, Microphone.";
+  }
+  function update() {
+    const st = Mic.state, canAsk = !["blocked", "unsupported"].includes(st);
+    body.innerHTML = `<div class="pad set-grid">
+      <div class="mic-hero"><div class="mic-badge" data-s="${st}">${ico(Mic.ok() ? "mic" : "micoff")}</div>
+        <div style="display:grid;gap:2px"><span class="label">Microphone status</span><b class="h" style="font-size:20px">${esc(MIC_LABEL[st])}</b><span class="hint">${Mic.framed ? "Running inside another page" : "Running as its own app"}</span></div></div>
+      <div class="row"><button class="btn primary" data-act="allow" ${canAsk && st !== "granted" ? "" : "disabled"}>${ico("mic", 15)} Allow microphone</button><button class="btn" data-act="test" ${canAsk && !Mic.testing ? "" : "disabled"}>${Mic.testing ? "Listening for 5 seconds" : "Test microphone"}</button><button class="btn ghost" data-act="check">${ico("refresh", 14)} Check again</button></div>
+      <div class="set-row"><span class="label">Input level</span><div class="meter"><i id="micMeter"></i></div><span class="hint">${Mic.testing ? "Say something. The bar moves with your voice." : "Press Test microphone and speak."}</span></div>
+      <div class="set-row"><span class="label">Checklist</span><ul class="checks">
+        <li>Microphone permission <b class="${st === "granted" ? "ok" : Mic.ok() ? "wait" : "no"}">${esc(MIC_LABEL[st])}</b></li>
+        <li>Speech recognition <b class="${Rec ? "ok" : "no"}">${Rec ? "Supported" : "Missing"}</b></li>
+        <li>Spoken replies <b class="${S.settings.voice && synth ? "ok" : "wait"}">${synth ? (S.settings.voice ? "On" : "Muted") : "Missing"}</b></li>
+        <li>Wake word <b class="${S.settings.wake ? "ok" : "wait"}">${S.settings.wake ? "On" : "Off"}</b></li>
+      </ul></div>
+      <div class="set-row"><span class="label">How to fix</span><div class="hint" style="font-size:14px;line-height:1.5">${help()}</div>
+        ${st === "blocked" ? `<div class="row"><a class="btn primary" href="${esc(S.settings.appUrl)}" target="_blank" rel="noopener">${ico("ext", 14)} Open the installed version</a></div><span class="hint">In Safari on your iPhone, open that address, tap Share, then Add to Home Screen. Allow the microphone when it asks.</span>` : ""}</div>
+      <div class="set-row"><span class="label">Privacy</span><span class="hint">The mic opens only while the button glows green, or while the wake word is on. Your browser's speech service turns speech into text: Apple on iPhone, Google in Chrome. ${esc(AN())} keeps no recordings.</span></div>
+    </div>`;
+  }
+  body.addEventListener("click", async e => {
+    const b = e.target.closest("[data-act]"); if (!b) return;
+    if (b.dataset.act === "allow") { const ok = await Mic.request(); if (ok) say(`Microphone online, ${addr()}. I'm listening whenever you need me.`); }
+    if (b.dataset.act === "test") Mic.test();
+    if (b.dataset.act === "check") { sfx("blip"); await Mic.check(); toast("Microphone: " + MIC_LABEL[Mic.state]); }
+  });
+  update();
+  return { update };
+} };
+
+/* ---------- Settings ---------- */
+APPS.settings = { name: "Settings", code: "CFG-05", w: 480, h: 640, mount(body) {
+  let armed = null;
+  function render() {
+    const st = S.settings, cv = pickVoice();
+    const vs = voices.length ? `<select class="field" id="voicePick" aria-label="Voice"><option value="">Auto: ${esc(cv ? cv.name : "best British voice")}</option>${[...voices].sort((a, b) => voiceScore(b) - voiceScore(a)).map(v => `<option value="${esc(v.name)}" ${v.name === st.voiceName ? "selected" : ""}>${esc(v.name)} · ${esc(v.lang)}</option>`).join("")}</select>` : `<span class="hint">${synth ? "Loading voices." : "This browser has no speech voices."}</span>`;
+    body.innerHTML = `<div class="pad set-grid">
+      <div class="set-row"><span class="label">Microphone</span><div class="row"><span class="chip ${Mic.ok() ? "mic-on" : "mic-off"}">${ico(Mic.ok() ? "mic" : "micoff", 12)} ${esc(MIC_LABEL[Mic.state])}</span><button class="btn sm" data-open-mic="1">Manage microphone</button></div></div>
+      <div class="set-row"><span class="label">Assistant name</span><input class="field" id="aName" value="${esc(st.aname)}" maxlength="20" placeholder="Ozzy" aria-label="Assistant name"><span class="hint">This is the wake word too.</span></div>
+      <div class="set-row"><span class="label">Address me as</span><div class="row"><div class="seg" role="group">${[["sir", "Sir"], ["maam", "Ma'am"], ["boss", "Boss"], ["custom", "Name"]].map(([v, l]) => `<button data-addr="${v}" aria-pressed="${st.address === v}">${l}</button>`).join("")}</div>
+        ${st.address === "custom" ? `<input class="field" id="addrName" style="max-width:160px" placeholder="Your name" value="${esc(st.name)}" aria-label="Your name">` : ""}</div></div>
+      <div class="set-row"><span class="label">Voice</span>${vs}
+        <div class="seg" role="group">${Object.entries(PRESETS).map(([k, p]) => `<button data-preset="${k}" aria-pressed="${st.preset === k}">${p.label}</button>`).join("")}</div>
+        <div class="row"><label class="toggle"><input type="checkbox" id="setVoice" ${st.voice ? "checked" : ""}> Spoken replies</label><label class="toggle"><input type="checkbox" id="setGreet" ${st.greet ? "checked" : ""}> Greet me on start</label><button class="btn sm" data-act="test">${ico("speaker", 13)} Test voice</button></div>
+        <span class="hint">Device voices sound best in Premium or Enhanced quality. On iPhone, open Settings, Accessibility, Spoken Content, Voices, English, then download Jamie, Daniel or Arthur in Premium quality. Pick it above afterward.</span></div>
+      <div class="set-row"><span class="label">Studio voice</span><span class="hint">A lifelike human voice from ElevenLabs. Needs your own ElevenLabs API key, a free account works. It runs in the installed app. Claude's page blocks it and falls back to your device voice.</span>
+        <div class="seg" role="group">${Object.entries(STUDIO).map(([k, v]) => `<button data-studio="${k}" aria-pressed="${st.studioVoice === k}">${esc(v.label)}</button>`).join("")}</div>
+        ${st.studioVoice === "custom" ? `<input class="field" id="studioVid" value="${esc(st.studioVoiceId)}" placeholder="Voice ID from your ElevenLabs voice library" aria-label="ElevenLabs voice ID">` : ""}
+        <input class="field" id="studioKey" type="password" autocomplete="off" value="${esc(st.studioKey)}" placeholder="ElevenLabs API key" aria-label="ElevenLabs API key">
+        <span class="hint">${st.studioKey ? (studioFailed ? "Studio voice paused for this session. Using the device voice." : "Studio voice on.") : "Off. Paste a key to turn it on."} The key stays in this browser only.</span></div>
+      <div class="set-row"><span class="label">Wake word</span><label class="toggle"><input type="checkbox" id="setWake" ${st.wake ? "checked" : ""} ${Rec ? "" : "disabled"}> Always listen for "${esc(AN())}"</label>
+        <span class="hint">Say "${esc(AN())}, check my email" hands-free. ${Rec ? "Works in the installed app with microphone access. The Claude page blocks the microphone." : "This browser has no speech recognition."}</span></div>
+      <div class="set-row"><span class="label">My phone number</span><input class="field" id="myNum" type="tel" value="${esc(st.myNumber)}" placeholder="Number with country code" aria-label="My phone number"><span class="hint">Used for "text me" reminders. Stored in this browser only.</span></div>
+      <div class="set-row"><span class="label">Email accounts</span><span class="hint">Every address shows as its own inbox in Mail, through your linked Gmail. Mail shows the one-time setup for each.</span>
+        ${st.accounts.length ? `<ul class="rows">${st.accounts.map(a => `<li style="display:flex;align-items:center;gap:6px"><button data-goacct="${esc(a)}" style="flex:1"><b>${esc(a)}</b></button><button class="icon-btn" data-delacct="${esc(a)}" aria-label="Remove ${esc(a)}">${ico("trash", 14)}</button></li>`).join("")}</ul>` : `<span class="hint">No extra addresses yet. Add them in Mail.</span>`}</div>
+      <div class="set-row"><span class="label">Interface sounds</span><label class="toggle"><input type="checkbox" id="setSounds" ${st.sounds ? "checked" : ""}> Clicks, chimes and alerts</label></div>
+      <div class="set-row"><span class="label">HUD color</span><div class="row">${[["arc", "#3fd8ff", "Arc"], ["mark", "#ff5a47", "Mark"], ["stealth", "#dfe9ee", "Stealth"]].map(([a, c, l]) => `<button class="swatch" data-set-accent="${a}" aria-pressed="${st.accent === a}"><i style="background:${c};box-shadow:0 0 8px ${c}"></i>${l}</button>`).join("")}</div></div>
+      <div class="set-row"><span class="label">Claude speed</span><div class="seg" role="group">${[["quick", "Fast"], ["default", "Balanced"], ["complex", "Deep"]].map(([v, l]) => `<button data-tier="${v}" aria-pressed="${st.tier === v}">${l}</button>`).join("")}</div></div>
+      <div class="set-row"><span class="label">Install on iPhone</span><span class="hint">Open the app's web address in Safari, tap Share, then Add to Home Screen.</span></div>
+      <div class="set-row"><span class="label">Your data</span><span class="hint">${S.notes.length} notes, ${S.contacts.length} contacts, ${S.sessions.length} focus sessions, stored in this browser.</span>
+        <div><button class="btn danger" data-act="wipe">${armed ? "Press again to erase everything" : "Erase all data"}</button></div></div>
+    </div>`;
+  }
+  body.addEventListener("click", e => {
+    if (e.target.closest("[data-open-mic]")) { openApp("mic"); return; }
+    const ad = e.target.closest("[data-addr]"); if (ad) { S.settings.address = ad.dataset.addr; sfx("blip"); changed(); return; }
+    const pr = e.target.closest("[data-preset]"); if (pr) { S.settings.preset = pr.dataset.preset; changed(); hush(); say(`Voice calibrated, ${addr()}.`); return; }
+    const a = e.target.closest("[data-set-accent]"); if (a) { A.setColor(a.dataset.setAccent); sfx("blip"); return; }
+    const r = e.target.closest("[data-tier]"); if (r) { S.settings.tier = r.dataset.tier; sfx("blip"); changed(); return; }
+    const sv = e.target.closest("[data-studio]"); if (sv) { S.settings.studioVoice = sv.dataset.studio; studioFailed = false; changed(); if (studioOn()) { hush(); say(`Studio voice set, ${addr()}.`); } return; }
+    const ga = e.target.closest("[data-goacct]"); if (ga) { S.settings.acct = ga.dataset.goacct; save(); openApp("mail"); Mail.load(); return; }
+    const da = e.target.closest("[data-delacct]"); if (da) { S.settings.accounts = S.settings.accounts.filter(x => x !== da.dataset.delacct); changed(); return; }
+    if (e.target.closest('[data-act="test"]')) { hush(); say(`${partOfDay()}, ${addr()}. ${AN()} online. All systems are running at full capacity.`); return; }
+    if (e.target.closest('[data-act="wipe"]')) {
+      if (!armed) { armed = setTimeout(() => { armed = null; render(); }, 4000); render(); return; }
+      clearTimeout(armed); armed = null;
+      const fresh = structuredClone(SEED); fresh.notes = []; fresh.log = [{ t: Date.now(), text: "All data erased" }]; fresh.settings = S.settings;
+      Object.keys(S).forEach(k => delete S[k]); Object.assign(S, fresh); sfx("close"); changed(); toast("All data erased.");
+    }
+  });
+  body.addEventListener("change", e => {
+    const id = e.target.id, st = S.settings;
+    if (id === "voicePick") { st.voiceName = e.target.value; hush(); say(`Voice set, ${addr()}.`); }
+    if (id === "setVoice") { st.voice = e.target.checked; if (!st.voice) hush(); }
+    if (id === "setGreet") st.greet = e.target.checked;
+    if (id === "setSounds") { st.sounds = e.target.checked; sfx("blip"); }
+    if (id === "setWake") { st.wake = e.target.checked; if (st.wake) { Mic.request().then(ok => { if (ok) startWake(); else { st.wake = false; save(); openApp("mic"); renderTop(); } }); } else stopWake(); }
+    if (id === "aName") st.aname = e.target.value.trim().slice(0, 20) || "Ozzy";
+    if (id === "addrName") st.name = e.target.value;
+    if (id === "myNum") st.myNumber = e.target.value.trim();
+    if (id === "studioKey") { st.studioKey = e.target.value.trim(); studioFailed = false; }
+    if (id === "studioVid") { st.studioVoiceId = e.target.value.trim(); studioFailed = false; }
+    changed();
+  });
+  render();
+  return { update() { const a = document.activeElement; if (!body.contains(a) || a.tagName === "BUTTON" || a.type === "checkbox") render(); } };
+} };
+
+/* ---------- HUD rendering ---------- */
+let orbState = "idle";
+function setOrb() {
+  orbState = listening ? "listening" : Ozzy.busy ? "thinking" : speaking ? "speaking" : "idle";
+  $("#coreState").textContent = { idle: S.settings.wake && wakeActive ? `Say "${AN()}"` : "Standing by", listening: "Listening", thinking: "Processing", speaking: "Speaking" }[orbState];
+  renderCmd();
+}
+let COL = {};
+function readColors() { const cs = getComputedStyle(document.documentElement); COL = { acc: cs.getPropertyValue("--accent").trim(), acc2: cs.getPropertyValue("--accent-2").trim(), ink: cs.getPropertyValue("--ink").trim(), ground: cs.getPropertyValue("--ground").trim(), ok: cs.getPropertyValue("--ok").trim() }; }
+function applySettings() {
+  const r = document.documentElement;
+  if (S.settings.accent === "arc") delete r.dataset.accent; else r.dataset.accent = S.settings.accent;
+  readColors(); drawWall();
+}
+function hexA(col, a) {
+  if (!col || !col.startsWith("#")) return `rgba(63,216,255,${a})`;
+  let h = col.slice(1); if (h.length === 3) h = h.split("").map(x => x + x).join("");
+  const n = parseInt(h, 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+}
+const wall = $("#wall");
+let DPR = 1;
+function drawWall() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  const W = wall.clientWidth, H = wall.clientHeight; if (!W) return;
+  wall.width = W * DPR; wall.height = H * DPR;
+  const c = wall.getContext("2d"); c.setTransform(DPR, 0, 0, DPR, 0, 0);
+  c.fillStyle = COL.ground || "#02070b"; c.fillRect(0, 0, W, H);
+  const g = c.createRadialGradient(W / 2, H * .4, 0, W / 2, H * .4, Math.max(W, H) * .7); g.addColorStop(0, hexA(COL.acc, .1)); g.addColorStop(1, hexA(COL.acc, 0));
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+  c.fillStyle = hexA(COL.acc, .13);
+  for (let y = 0, row = 0; y < H; y += 26, row++) for (let x = row % 2 ? 13 : 0; x < W; x += 26) c.fillRect(x, y, 1.2, 1.2);
+}
+function drawCore(cv, t) {
+  const r0 = cv.getBoundingClientRect(); if (!r0.width) return;
+  const W = Math.round(r0.width * DPR), H = Math.round(r0.height * DPR);
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const c = cv.getContext("2d"); c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, r0.width, r0.height);
+  const cx = r0.width / 2, cy = r0.height / 2, R = r0.width * .3, s = t / 1000;
+  const col = orbState === "listening" ? COL.ok : COL.acc;
+  if (orbState === "speaking") speakLevel = Math.max(speakLevel * .88, .3 + Math.random() * .45); else speakLevel *= .9;
+  const lvl = orbState === "listening" ? .45 + .3 * Math.sin(s * 8) : orbState === "speaking" ? speakLevel : orbState === "thinking" ? .25 : .08 + .04 * Math.sin(s * 1.5);
+  const ring = (r, w, dash, rot, a) => { c.save(); c.translate(cx, cy); c.rotate(rot); c.strokeStyle = hexA(col, a); c.lineWidth = w; c.setLineDash(dash); c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); c.stroke(); c.restore(); };
+  const seg = (r, w, a0, len, rot, a, k = col) => { c.save(); c.translate(cx, cy); c.rotate(rot); c.strokeStyle = hexA(k, a); c.lineWidth = w; c.setLineDash([]); c.beginPath(); c.arc(0, 0, r, a0, a0 + len); c.stroke(); c.restore(); };
+  c.save(); c.translate(cx, cy); c.rotate(s * .03);
+  for (let i = 0; i < 120; i++) { const a = i / 120 * Math.PI * 2, long = i % 10 === 0, r1 = R * 1.5, r2 = r1 + (long ? 10 : 4); c.strokeStyle = hexA(col, long ? .6 : .3); c.lineWidth = 1; c.beginPath(); c.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); c.lineTo(Math.cos(a) * r2, Math.sin(a) * r2); c.stroke(); }
+  c.restore();
+  ring(R * 1.4, 1, [2, 6], -s * .06, .45);
+  for (let k = 0; k < 3; k++) seg(R * 1.3, 3, k * 2.09, 1.25, s * .25, .7);
+  seg(R * 1.3, 5, .3, .25, s * .25 + 1, .9, COL.acc2);
+  ring(R * 1.18, 8, [3, 5], -s * .12, .2);
+  const N = 96; c.lineCap = "round";
+  for (let i = 0; i < N; i++) {
+    const a = i / N * Math.PI * 2, n = .5 + .5 * Math.sin(i * 1.7 + s * 6) * Math.cos(i * .6 - s * 3.3);
+    const len = 3 + lvl * n * R * .55;
+    c.strokeStyle = hexA(col, .3 + .65 * n * Math.min(1, lvl * 1.6)); c.lineWidth = 2;
+    c.beginPath(); c.moveTo(cx + Math.cos(a) * R * 1.02, cy + Math.sin(a) * R * 1.02); c.lineTo(cx + Math.cos(a) * (R * 1.02 + len), cy + Math.sin(a) * (R * 1.02 + len)); c.stroke();
+  }
+  ring(R, 1.5, [], 0, .7);
+  for (let k = 0; k < 3; k++) seg(R * .82, 4, k * 2.09, orbState === "thinking" ? 1.5 : .8, orbState === "thinking" ? s * 4 : s * .5, .9);
+  for (let k = 0; k < 8; k++) seg(R * .62, 6, k / 8 * Math.PI * 2, .45, -s * .3, .35);
+  ring(R * .5, 1, [1, 4], s * .2, .5);
+  const pulse = .5 + .5 * Math.sin(s * 2.2);
+  const g = c.createRadialGradient(cx, cy, 0, cx, cy, R * .55); g.addColorStop(0, hexA(COL.ink, .95)); g.addColorStop(.25, hexA(col, .75 + lvl * .25)); g.addColorStop(.6, hexA(col, .18 + pulse * .1 + lvl * .2)); g.addColorStop(1, hexA(col, 0));
+  c.fillStyle = g; c.beginPath(); c.arc(cx, cy, R * .55, 0, Math.PI * 2); c.fill();
+  c.save(); c.translate(cx, cy); c.rotate(s * .15); c.strokeStyle = hexA(COL.ink, .5); c.lineWidth = 1.5; c.beginPath();
+  for (let k = 0; k < 3; k++) { const a = k * 2.094 - Math.PI / 2; c[k ? "lineTo" : "moveTo"](Math.cos(a) * R * .3, Math.sin(a) * R * .3); } c.closePath(); c.stroke(); c.restore();
+}
+function drawMini(t) {
+  const cv = $("#coreMini"), c = cv.getContext("2d"), s = t / 1000, col = orbState === "listening" ? COL.ok : COL.acc;
+  c.clearRect(0, 0, 60, 60);
+  c.strokeStyle = hexA(col, .9); c.lineWidth = 2.5;
+  c.save(); c.translate(30, 30); c.rotate(orbState === "thinking" ? s * 4 : s * .8);
+  for (let k = 0; k < 3; k++) { c.beginPath(); c.arc(0, 0, 22, k * 2.09, k * 2.09 + 1.3); c.stroke(); } c.restore();
+  const lvl = orbState === "speaking" ? speakLevel : orbState === "listening" ? .6 : .2;
+  const g = c.createRadialGradient(30, 30, 0, 30, 30, 15); g.addColorStop(0, hexA(COL.ink, 1)); g.addColorStop(.4, hexA(col, .7 + lvl * .3)); g.addColorStop(1, hexA(col, 0));
+  c.fillStyle = g; c.beginPath(); c.arc(30, 30, 15, 0, Math.PI * 2); c.fill();
+}
+let last = 0;
+function loop(t) {
+  requestAnimationFrame(loop);
+  if (document.hidden || t - last < 33) return; last = t;
+  const tt = reduced ? 0 : t;
+  drawCore($("#core"), tt); drawMini(tt);
+}
+let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(drawWall, 120); });
+
+/* ---------- Launcher ---------- */
+function openPalette() {
+  if ($(".palette")) return;
+  sfx("open");
+  const ov = document.createElement("div"); ov.className = "palette";
+  ov.innerHTML = `<div class="pal-box" role="dialog" aria-label="Command line"><input id="palIn" placeholder="Open an app, run a command, or ask ${esc(AN())}" autocomplete="off" aria-label="Command"><ul class="pal-list" role="listbox"></ul></div>`;
+  document.body.appendChild(ov);
+  const inp = $("#palIn", ov), ul = $(".pal-list", ov); let sel = 0, items = [];
+  const base = () => [
+    ...ORDER.map(id => ({ ic: id, label: `Open ${NAMES[id]}`, k: "App", run: () => openApp(id) })),
+    { ic: "mic", label: `Talk to ${AN()}`, k: "Voice", run: () => Ozzy.mic() },
+    { ic: "mic", label: "Microphone access", k: "Settings", run: () => openApp("mic") },
+    { ic: "pen", label: "Compose email", k: "Mail", run: () => A.composeEmail({}) },
+    ...S.contacts.slice(0, 8).map(c => ({ ic: "messages", label: `Text ${c.name}`, k: "Messages", run: () => A.composeText(c.id, "") })),
+    { ic: "focus", label: "Engage 25 minute focus", k: "Command", run: () => A.startFocus(25) },
+    { ic: S.settings.voice ? "mute" : "speaker", label: S.settings.voice ? "Mute voice" : "Turn on voice", k: "Command", run: () => $("#voiceBtn").click() }
+  ];
+  function build() {
+    const q = inp.value.trim().toLowerCase();
+    items = base().filter(x => !q || x.label.toLowerCase().includes(q));
+    if (q) items.push({ ic: "home", label: `Ask ${AN()}: ${inp.value.trim()}`, k: AN(), run: () => Ozzy.send(inp.value) });
+    sel = Math.max(0, Math.min(sel, items.length - 1));
+    ul.innerHTML = items.map((x, i) => `<li role="option" data-i="${i}" aria-selected="${i === sel}">${ico(x.ic, 16)}<span>${esc(x.label)}</span><span class="k">${esc(x.k)}</span></li>`).join("");
+  }
+  const close = () => ov.remove();
+  const run = i => { const it = items[i]; close(); it?.run(); };
+  inp.addEventListener("input", () => { sel = 0; build(); });
+  inp.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { sel = Math.min(items.length - 1, sel + 1); build(); e.preventDefault(); }
+    if (e.key === "ArrowUp") { sel = Math.max(0, sel - 1); build(); e.preventDefault(); }
+    if (e.key === "Enter") run(sel);
+    if (e.key === "Escape") { close(); sfx("close"); }
+  });
+  ul.addEventListener("click", e => { const li = e.target.closest("li"); if (li) run(+li.dataset.i); });
+  ov.addEventListener("pointerdown", e => { if (e.target === ov) { close(); sfx("close"); } });
+  build(); inp.focus();
+}
+$("#searchBtn").onclick = () => openPalette();
+aiChip.onclick = () => openApp(aiState === "ready" ? "log" : "settings");
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $(".palette") ? $(".palette").remove() : openPalette(); }
+  if (e.key === "Escape") $(".palette")?.remove();
+});
+
+/* ---------- Greeting on first interaction (audio needs a gesture) ---------- */
+let greeted = false;
+document.addEventListener("pointerdown", e => {
+  audio(); if (greeted) return; greeted = true;
+  resumeWake();
+  if (!S.settings.greet || e.target.closest("#micBig, #coreHit, #brand")) return;
+  sfx("boot");
+  setTimeout(() => {
+    if (speaking || listening || Ozzy.busy) return;
+    const mail = Mail.state === "ready" ? ` You have ${Mail.unread || "no"} unread email${Mail.unread === 1 ? "" : "s"}.` : "";
+    const line = `${partOfDay()}, ${addr()}. ${AN()} online.${mail} How may I help?`;
+    setCaption(line, ""); say(line);
+  }, 700);
+}, { capture: true });
+
+/* ---------- Boot ---------- */
+readColors(); applySettings(); renderHome(); renderDock(); renderTop(); tick(); Mic.check();
+setCaption(`${partOfDay()}, ${addr()}. Tap the core or the mic and speak, or type below.`, "");
+requestAnimationFrame(() => { drawWall(); setOrb(); requestAnimationFrame(loop); });
+document.fonts?.ready.then(() => drawWall());
+})();
+</script>
