@@ -1,0 +1,261 @@
+      else if ((m = s.match(/^(?:color|colour|hud)\s+(arc|mark|stealth)/i))) { A.setColor(m[1].toLowerCase()); out = `Display recalibrated, ${a}.`; }
+      else if (/what(?:'s| is) the time|time is it/i.test(s)) out = `It's ${hhmm(Date.now())}, ${a}.`;
+      else if (/^(?:status|report|system)/i.test(s)) out = `All systems nominal. ${Mail.unread != null ? Mail.unread + " unread emails, " : ""}${weekMinutes()} focus minutes this week, ${S.contacts.length} contacts on file.`;
+      else if (/^(?:hello|hi|hey|good (?:morning|afternoon|evening))\b/i.test(s)) out = `${partOfDay()}, ${a}. At your service.`;
+      else if (/^(?:stop|cancel|never ?mind|quiet)/i.test(s)) { hush(); out = "Of course."; }
+      else out = `My link to Claude is down, ${a}, so I know a short list:\n- check my email\n- read my latest email\n- text Mum on my way\n- call Mum\n- note Buy milk\n- focus 25\n- status`;
+    } catch (e) { out = e.message; }
+    this.reply(out);
+  },
+  async send(text) {
+    text = String(text || "").trim(); if (!text || this.busy) return;
+    hush(); pauseWake(); sfx("blip");
+    S.chat.push({ role: "user", content: text }); setCaption("", text); wins.get("log")?.inst.update();
+    if (!sample) { this.busy = true; setOrb(); await this.local(text); this.busy = false; setOrb(); if (!speaking && !utterCount) resumeWake(); return; }
+    const pending = { role: "assistant", content: "" }; S.chat.push(pending);
+    this.busy = true; this.ctl = new AbortController(); setOrb();
+    const turns = [{ role: "user", content: this.rules() }, ...S.chat.filter(m => (m.role === "user" || m.role === "assistant") && m !== pending && m.content).slice(-14).map(m => ({ role: m.role, content: m.content }))];
+    let spoken = 0;
+    try {
+      const opts = { modelTier: tierOf(), signal: this.ctl.signal, onText: ({ text }) => {
+        pending.content = text; setCaption(text, ""); wins.get("log")?.inst.update();
+        const m = text.slice(spoken).match(/^[\s\S]*[.!?:](?=\s)/);
+        if (m && m[0].trim()) { say(m[0]); spoken += m[0].length; }
+      } };
+      if (aiTools) opts.tools = this.tools(); else opts.cache = false;
+      const r = await sample(turns, opts);
+      pending.content = r.text.trim(); setCaption(pending.content, "");
+      const rest = r.text.slice(spoken).trim(); if (rest) say(rest);
+    } catch (e) {
+      if (e?.code === "cancelled") pending.content = (e.text || "").trim() || "Standing down.";
+      else { const msg = aiError(e); pending.content = ((e?.code !== "refused" && e?.text) ? e.text.trim() + "\n\n" : "") + msg; say(msg); }
+      setCaption(pending.content, "");
+    }
+    S.chat = S.chat.filter(m => m.content).slice(-60); this.busy = false; this.ctl = null; setOrb(); save(); wins.get("log")?.inst.update();
+    if (!speaking && !utterCount) resumeWake();
+  },
+  mic() { audio(); if (speaking) { hush(); return; } if (this.busy) { this.ctl?.abort(); return; } listen(t => this.send(t)); }
+};
+function setCaption(reply, you) {
+  const el = $("#caption");
+  el.innerHTML = you ? `<small>YOU</small><span class="you">${esc(you)}</span>` : reply ? `<small>${esc(AN().toUpperCase())}</small>${esc(reply.length > 280 ? reply.slice(0, 280) + "…" : reply)}` : "";
+}
+function showHeard(t) { if (t) setCaption("", t); $("#cmdIn").placeholder = t || "Speak or type a command"; }
+
+/* ---------- Window manager ---------- */
+const stage = $("#stage");
+let z = 10, cascade = 0;
+const APPS = {};
+const ORDER = ["home", "mail", "messages", "notes", "focus", "log", "settings"];
+const NAMES = { mic: "Microphone", home: "Home", mail: "Mail", messages: "Messages", notes: "Notes", focus: "Focus", log: "Log", settings: "Settings" };
+const isNarrow = () => window.matchMedia("(max-width: 720px)").matches;
+function openApp(id, opts = {}) {
+  if (id === "home") { for (const w of wins.values()) w.el.hidden = true; sfx("close"); renderDock(); return null; }
+  const app = APPS[id]; if (!app) return null;
+  let w = wins.get(id);
+  if (w) { if (w.el.hidden) sfx("open"); w.el.hidden = false; focusWin(w); renderDock(); return w; }
+  const el = document.createElement("section");
+  el.className = "win opening"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", app.name);
+  el.innerHTML = `<header class="win-bar"><span class="app-ico">${ico(id, 15)}</span><h2>${esc(app.name)}</h2><span class="code">${app.code}</span><div class="win-ctl">
+    <button data-act="min" aria-label="Minimize">${ico("min")}</button><button data-act="max" aria-label="Maximize">${ico("max")}</button><button data-act="close" aria-label="Close">${ico("close")}</button></div></header>
+    <div class="win-body"></div><div class="win-resize" aria-hidden="true"></div>`;
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  const W = Math.min(app.w, sw), H = Math.min(app.h, sh);
+  const x = opts.x ?? Math.max(0, Math.min(sw - W, (sw - W) / 2 + (cascade - 2) * 30));
+  const y = opts.y ?? Math.max(0, Math.min(sh - H, 10 + cascade * 24));
+  cascade = (cascade + 1) % 5;
+  Object.assign(el.style, { left: x + "px", top: y + "px", width: W + "px", height: H + "px" });
+  stage.appendChild(el);
+  el.addEventListener("animationend", () => el.classList.remove("opening"), { once: true });
+  w = { id, el, body: $(".win-body", el) };
+  wins.set(id, w);
+  w.inst = app.mount(w.body, w) || {};
+  wireWin(w); focusWin(w); renderDock();
+  if (!opts.silent) sfx("open");
+  return w;
+}
+function closeApp(id) { const w = wins.get(id); if (!w) return; w.inst?.destroy?.(); w.el.remove(); wins.delete(id); sfx("close"); renderDock(); }
+function focusWin(w) { for (const o of wins.values()) o.el.classList.toggle("active", o === w); w.el.style.zIndex = ++z; }
+function wireWin(w) {
+  const { el } = w, bar = $(".win-bar", el);
+  el.addEventListener("pointerdown", () => focusWin(w));
+  bar.addEventListener("click", e => {
+    const b = e.target.closest("button[data-act]"); if (!b) return;
+    if (b.dataset.act === "close") closeApp(w.id);
+    if (b.dataset.act === "min") { el.hidden = true; sfx("close"); renderDock(); }
+    if (b.dataset.act === "max") { el.classList.toggle("max"); sfx("blip"); }
+  });
+  bar.addEventListener("dblclick", e => { if (!e.target.closest("button")) el.classList.toggle("max"); });
+  drag(bar, el, (dx, dy, o) => {
+    if (el.classList.contains("max") || isNarrow()) return;
+    el.style.left = Math.max(80 - el.offsetWidth, Math.min(stage.clientWidth - 80, o.l + dx)) + "px";
+    el.style.top = Math.max(0, Math.min(stage.clientHeight - 40, o.t + dy)) + "px";
+  });
+  drag($(".win-resize", el), el, (dx, dy, o) => {
+    el.style.width = Math.max(300, Math.min(stage.clientWidth, o.w + dx)) + "px";
+    el.style.height = Math.max(220, Math.min(stage.clientHeight, o.h + dy)) + "px";
+  });
+}
+function drag(handle, el, move) {
+  handle.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.target.closest("button")) return;
+    const sx = e.clientX, sy = e.clientY, o = { l: el.offsetLeft, t: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
+    handle.setPointerCapture(e.pointerId);
+    const mv = ev => move(ev.clientX - sx, ev.clientY - sy, o);
+    const up = () => { handle.removeEventListener("pointermove", mv); handle.removeEventListener("pointerup", up); handle.removeEventListener("pointercancel", up); };
+    handle.addEventListener("pointermove", mv); handle.addEventListener("pointerup", up); handle.addEventListener("pointercancel", up);
+    e.preventDefault();
+  });
+}
+
+/* ---------- Dock, top bar, toasts ---------- */
+const dock = $("#dock");
+function renderDock() {
+  const anyOpen = [...wins.values()].some(w => !w.el.hidden);
+  dock.innerHTML = ORDER.map((id, i) => {
+    const open = id === "home" ? !anyOpen : wins.has(id) && !wins.get(id).el.hidden;
+    const badge = id === "mail" && Mail.unread ? `<span class="badge">${Mail.unread > 99 ? "99+" : Mail.unread}</span>` : "";
+    return `${i === 6 ? '<span class="sep"></span>' : ""}<button data-app="${id}" class="${open ? "open" : ""}" title="${NAMES[id]}" aria-label="${NAMES[id]}">${ico(id)}<span class="dl">${NAMES[id]}</span>${badge}</button>`;
+  }).join("");
+}
+dock.addEventListener("click", e => {
+  const b = e.target.closest("button[data-app]"); if (!b) return;
+  const id = b.dataset.app, w = wins.get(id);
+  if (w && !w.el.hidden && w.el.classList.contains("active")) { w.el.hidden = true; sfx("close"); renderDock(); } else openApp(id);
+});
+function renderTop() {
+  const v = $("#voiceBtn"); v.innerHTML = ico(S.settings.voice ? "speaker" : "mute"); v.setAttribute("aria-pressed", S.settings.voice); v.title = S.settings.voice ? "Voice replies on" : "Voice replies off";
+  const mc = $("#micChip"), bad = !Mic.ok();
+  mc.hidden = Mic.state === "unknown" || Mic.state === "prompt";
+  mc.className = "chip " + (bad ? "mic-off" : "mic-on");
+  mc.innerHTML = `${ico(bad ? "micoff" : "mic", 12)}<span>${bad ? "Mic off" : listening ? "Mic live" : "Mic ready"}</span>`;
+  mc.title = "Microphone: " + MIC_LABEL[Mic.state];
+  const wc = $("#wakeChip"); wc.hidden = !S.settings.wake; wc.innerHTML = `${ico("mic", 12)}<span>${wakeActive ? `Say "${esc(AN())}"` : "Wake paused"}</span>`;
+  $("#brandName").textContent = `${AN().toUpperCase()} OS`; $("#coreName").textContent = AN().toUpperCase();
+  renderCmd();
+}
+function renderCmd() {
+  const mb = $("#micBig"); mb.innerHTML = ico(speaking || Ozzy.busy ? "stop" : "mic"); mb.classList.toggle("live", listening); mb.setAttribute("aria-label", listening ? "Stop listening" : speaking ? "Stop speaking" : "Speak a command");
+  $("#cmdSend").innerHTML = ico("send", 16);
+}
+$("#voiceBtn").onclick = () => { S.settings.voice = !S.settings.voice; if (!S.settings.voice) hush(); else say(`Voice online, ${addr()}.`); sfx("blip"); changed(); };
+$("#wakeChip").onclick = () => openApp("settings");
+$("#micChip").onclick = () => openApp("mic");
+function toast(msg, actLabel, act) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
+  if (actLabel) { const b = document.createElement("button"); b.textContent = actLabel; b.className = "btn ghost sm"; b.style.marginLeft = "10px"; b.onclick = () => { act(); t.remove(); }; t.appendChild(b); }
+  $("#toasts").appendChild(t); setTimeout(() => t.remove(), 6000);
+}
+
+/* ---------- Focus math and clock ---------- */
+function focusMinutes(from, to) { return S.sessions.filter(s => s.at >= from && s.at < to).reduce((a, s) => a + s.mins, 0); }
+function weekMinutes() { const t0 = startOfDay(Date.now()) - 6 * DAY; return focusMinutes(t0, Date.now() + 1); }
+function remainingSec() { const f = S.focus; return f.running ? Math.max(0, Math.ceil((f.endAt - Date.now()) / 1000)) : f.remaining; }
+const fmt = s => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+function tick() {
+  const f = S.focus, chip = $("#timerChip");
+  if (f.running && Date.now() >= f.endAt) {
+    f.running = false; S.sessions.push({ at: Date.now(), mins: f.length }); f.remaining = f.length * 60;
+    log(`Focus complete: ${f.length} min`); sfx("alert"); toast(`Focus session complete. ${f.length} minutes logged.`);
+    say(`Focus session complete, ${addr()}. ${f.length} minutes logged. I'd suggest a short break.`); changed();
+  }
+  chip.hidden = !f.running;
+  if (f.running) chip.innerHTML = `${ico("focus", 13)}<span>${fmt(remainingSec())}</span>`;
+  wins.get("focus")?.inst.tick?.();
+  const d = new Date();
+  $("#clock").innerHTML = `${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}<small>${d.toLocaleDateString([], { weekday: "short", day: "2-digit", month: "short" }).toUpperCase()}</small>`;
+  const tw = $("#wTime"); if (tw) tw.textContent = hhmm(d);
+  const fr = $("#wFocusT"); if (fr) fr.textContent = fmt(remainingSec());
+}
+$("#timerChip").onclick = () => openApp("focus");
+setInterval(tick, 1000);
+
+/* =================== HOME SCREEN =================== */
+function renderHome() {
+  const L = $("#colL"), R = $("#colR"); if (!L) return;
+  let mailBody;
+  if (Mail.state === "unavailable") mailBody = `<div class="hint">Email reading works inside Claude, where your Gmail connector lives.</div>`;
+  else if (Mail.state === "needs" || Mail.state === "denied") mailBody = `<div class="empty">Link your Gmail so ${esc(AN())} reads your inbox.<button class="btn primary" data-act="mail-connect">${ico("mail", 15)} Connect Gmail</button></div>`;
+  else if (Mail.state === "error") mailBody = `<div class="err">${esc(Mail.error)}</div><button class="btn sm" data-act="mail-connect">${ico("refresh", 13)} Retry</button>`;
+  else if (Mail.unread == null) mailBody = `<div class="hint">Scanning inbox...</div>`;
+  else mailBody = `<div class="big">${Mail.unread}<small>UNREAD</small></div>${S.settings.accounts.length ? `<dl class="readout">${S.settings.accounts.map(a => `<dt style="text-transform:none;overflow:hidden;text-overflow:ellipsis">${esc(a)}</dt><dd>${Mail.acctCounts[a] ?? "–"}</dd>`).join("")}</dl>` : ""}${Mail.unreadList.length ? `<ul class="rows">${Mail.unreadList.slice(0, 4).map(t => `<li class="unread"><button data-thread="${esc(t.id)}"><b>${esc(t.from)}</b><span>${esc(t.subject)}</span></button></li>`).join("")}</ul>` : `<div class="hint">Inbox clear.</div>`}`;
+  const favs = S.contacts.slice(0, 6);
+  const msgBody = favs.length ? `<div class="contact-row">${favs.map(c => `<button class="contact-pill" data-text="${c.id}"><span class="avatar">${esc(initials(c.name))}</span>${esc(c.name)}</button>`).join("")}</div>`
+    : `<div class="empty">No contacts yet. Add one to text or call from here.<button class="btn" data-open="messages">${ico("plus", 15)} Add contact</button></div>`;
+  L.innerHTML = `
+    <section class="widget"><div class="w-head"><span class="label">${ico("mail", 14)} Mail</span><button class="btn ghost sm" data-open="mail">Open</button></div>${mailBody}</section>
+    <section class="widget"><div class="w-head"><span class="label">${ico("messages", 14)} Messages</span><button class="btn ghost sm" data-open="messages">Open</button></div>${msgBody}
+      ${S.settings.myNumber ? `<div class="hint">Your number: <span class="mono">${esc(S.settings.myNumber)}</span></div>` : `<div class="hint">Add your number in Settings to text yourself reminders.</div>`}</section>`;
+  const f = S.focus, r = remainingSec(), C = 2 * Math.PI * 26;
+  const latest = S.notes[0];
+  R.innerHTML = `
+    <section class="widget"><div class="w-head"><span class="label">${ico("focus", 14)} Focus</span><button class="btn ghost sm" data-open="focus">Open</button></div>
+      <div class="mini-ring"><svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="26" fill="none" stroke="var(--line)" stroke-width="4"/><circle cx="30" cy="30" r="26" fill="none" stroke="var(--accent)" stroke-width="4" stroke-dasharray="${C}" stroke-dashoffset="${(C * (1 - r / (f.length * 60))).toFixed(1)}"/></svg>
+        <div><div class="big mono" id="wFocusT" style="font-size:28px">${fmt(r)}</div><div class="hint">${weekMinutes()} min this week</div></div></div>
+      <div class="row"><button class="btn primary sm" data-act="focus-go">${f.running ? "Pause" : ico("bolt", 13) + " Engage"}</button>${[15, 25, 50].map(m => `<button class="btn sm" data-len="${m}" ${f.running ? "disabled" : ""}>${m}m</button>`).join("")}</div></section>
+    <section class="widget"><div class="w-head"><span class="label">${ico("notes", 14)} Latest note</span><button class="btn ghost sm" data-open="notes">Open</button></div>
+      ${latest ? `<button class="note-peek" data-open="notes"><b>${esc(latest.title)}</b><span>${esc(latest.body)}</span></button>` : `<div class="hint">No notes yet.</div>`}</section>
+    <section class="widget"><div class="w-head"><span class="label">System</span><span class="big" id="wTime" style="font-size:20px">${hhmm(Date.now())}</span></div>
+      <dl class="readout">
+        <dt>CLAUDE</dt><dd class="${aiState === "ready" ? "on" : ""}">${aiState === "ready" ? "LINKED" : aiState === "connecting" ? "SEEKING" : "LOCAL"}</dd>
+        <dt>GMAIL</dt><dd class="${Mail.state === "ready" ? "on" : ""}">${{ ready: "LINKED", loading: "SYNCING", needs: "NOT LINKED", denied: "BLOCKED", error: "FAULT", unavailable: "CLAUDE ONLY", idle: "STANDBY" }[Mail.state]}</dd>
+        <dt>VOICE</dt><dd class="${S.settings.voice ? "on" : ""}">${S.settings.voice ? (PRESETS[S.settings.preset]?.label || "ON").toUpperCase() : "MUTED"}</dd>
+        <dt>MICROPHONE</dt><dd class="${Mic.state === "granted" ? "on" : ""}">${MIC_LABEL[Mic.state].toUpperCase()}</dd>
+        <dt>WAKE WORD</dt><dd class="${wakeActive ? "on" : ""}">${S.settings.wake ? (wakeActive ? "LISTENING" : "PAUSED") : "OFF"}</dd>
+        <dt>CONTACTS</dt><dd>${S.contacts.length}</dd>
+      </dl></section>`;
+  $("#micHint").innerHTML = Mic.ok() ? "" : `<div class="mic-hint">${ico("micoff", 15)}<span>Microphone ${esc(MIC_LABEL[Mic.state].toLowerCase())}. Typing still works.</span><button class="btn sm" data-open="mic">Fix it</button></div>`;
+  $("#chips").innerHTML = ["Check my email", "Read my latest email", S.contacts[0] ? `Text ${S.contacts[0].name} I'm on my way` : "Add a contact", "Start a 25 minute focus session"]
+    .map(s => `<button type="button">${esc(s)}</button>`).join("");
+}
+$("#home").addEventListener("click", e => {
+  const o = e.target.closest("[data-open]"); if (o) { openApp(o.dataset.open); return; }
+  const th = e.target.closest("[data-thread]"); if (th) { openApp("mail").inst.open(th.dataset.thread); return; }
+  const tx = e.target.closest("[data-text]"); if (tx) { A.composeText(tx.dataset.text, ""); return; }
+  const l = e.target.closest("[data-len]"); if (l && !S.focus.running) { S.focus.length = +l.dataset.len; S.focus.remaining = S.focus.length * 60; sfx("blip"); changed(); return; }
+  const a = e.target.closest("[data-act]");
+  if (a?.dataset.act === "mail-connect") { Mail.load(); return; }
+  if (a?.dataset.act === "focus-go") { S.focus.running ? A.pauseFocus() : A.startFocus(); return; }
+  const c = e.target.closest("#chips button"); if (c) { if (c.textContent === "Add a contact") openApp("messages"); else Ozzy.send(c.textContent); }
+});
+$("#cmd").addEventListener("submit", e => { e.preventDefault(); const i = $("#cmdIn"); const v = i.value; i.value = ""; Ozzy.send(v); });
+$("#micBig").onclick = () => Ozzy.mic();
+$("#coreHit").onclick = () => Ozzy.mic();
+$("#brand").onclick = () => { openApp("home"); Ozzy.mic(); };
+
+/* =================== APPS =================== */
+
+/* ---------- Mail ---------- */
+APPS.mail = { name: "Mail", code: "COM-01", w: 760, h: 620, mount(body) {
+  let view = "list", cur = null, draft = { to: "", subject: "", body: "", threadId: "" }, status = "", sending = false;
+  const blank = () => ({ to: "", subject: "", body: "", threadId: "" });
+  function acctBar() {
+    const cur = S.settings.acct || "all", accts = S.settings.accounts;
+    const chip = (id, label, n) => `<button class="chip ${cur === id ? "on" : ""}" data-acct="${esc(id)}">${label}${n ? ` · ${n}` : ""}</button>`;
+    return `<div class="acct">${accts.length ? chip("all", `${ico("mail", 11)} All inboxes`, Mail.unread) + chip("main", "Main Gmail", 0) : `<span class="chip on">${ico("mail", 11)} Gmail${Mail.state === "ready" ? " · linked" : ""}</span>`}
+      ${accts.map(a => chip(a, esc(a), Mail.acctCounts[a])).join("")}
+      <form class="row" data-form="acct" style="gap:4px"><input class="field" id="acctIn" type="email" placeholder="Add another address" style="width:200px;padding:3px 8px;font-size:14px" aria-label="Add another email address"><button class="btn sm" type="submit" aria-label="Add address">${ico("plus", 12)}</button></form></div>`;
+  }
+  function setupCard(a) {
+    return `<div class="msgcard" style="margin:14px"><span class="label">Bring ${esc(a)} into ${esc(AN())}</span>
+      <div class="hint" style="font-size:14px;line-height:1.55">Claude links one Google account. To see ${esc(a)} here, route its mail into your linked Gmail once. ${esc(AN())} then sorts it into this inbox for you.<br><br>
+      <b>If ${esc(a)} is a Gmail address:</b> sign in to it on the Gmail website, open Settings, See all settings, Forwarding and POP/IMAP. Press Add a forwarding address, enter your main Gmail, confirm the code, then pick Forward a copy.<br><br>
+      <b>If it's Outlook, Hotmail, Yahoo or iCloud:</b> in your main Gmail on the website, open Settings, See all settings, Accounts and Import, then Check mail from other accounts, and add ${esc(a)}.<br><br>
+      <b>To reply from ${esc(a)}:</b> in your main Gmail, open Accounts and Import, Send mail as, add ${esc(a)}, then choose Reply from the same address the message was sent to.</div>
+      <div class="row"><button class="btn sm" data-act="refresh">${ico("refresh", 13)} Check again</button><a class="btn ghost sm" href="https://mail.google.com/mail/u/0/#settings/fwdandpop" target="_blank" rel="noopener">${ico("ext", 13)} Gmail forwarding settings</a><button class="btn ghost sm danger" data-rmacct="${esc(a)}">Remove</button></div></div>`;
+  }
+  const statusLine = () => status ? `<div class="${status.startsWith("!") ? "err" : "ai-out"}">${esc(status.replace(/^!/, ""))}</div>` : "";
+  function render() {
+    const top = `<div class="mail-top">${acctBar()}
+      ${view === "list" ? `<div class="row"><div class="seg" role="group">${["inbox", "unread", "starred", "sent"].map(t => `<button data-tab="${t}" aria-pressed="${Mail.tab === t}">${t.toUpperCase()}</button>`).join("")}</div>
+        <form class="row" data-form="search" style="flex:1;min-width:160px;gap:4px"><input class="field" id="mailQ" placeholder="Search mail" value="${esc(Mail.q)}" style="padding:4px 8px;font-size:14px" aria-label="Search mail"></form>
+        <button class="btn sm" data-act="refresh" aria-label="Refresh" ${mcp ? "" : "disabled"}>${ico("refresh", 13)}</button><button class="btn primary sm" data-act="new" ${mcp ? "" : "disabled"}>${ico("pen", 13)} Compose</button></div>` : ""}</div>`;
+    let main = "";
+    if (view === "list") {
+      if (Mail.state === "unavailable") main = `<div class="pad"><div class="empty">Email reading works inside Claude, where your Gmail connector lives.<span class="hint">Open this page inside Claude to read all your inboxes here.</span></div></div>`;
+      else if (Mail.state === "needs" || Mail.state === "denied") main = `<div class="pad"><div class="empty">Link Gmail so ${esc(AN())} reads, searches and replies to your email.<button class="btn primary" data-act="connect">${ico("mail", 15)} Connect Gmail</button><span class="hint">Claude asks you to allow it once.</span></div></div>`;
+      else if (Mail.state === "error") main = `<div class="pad"><div class="err">${esc(Mail.error)}</div></div>`;
+      else if (Mail.state === "loading" && !Mail.threads.length) main = `<div class="pad hint">Syncing...</div>`;
+      else main = Mail.threads.length ? `<ul class="mlist">${Mail.threads.map(t => `<li class="${t.unread ? "unread" : ""}"><button data-id="${esc(t.id)}"><span class="from">${esc(t.from)}${t.count > 1 ? ` <span class="hint">(${t.count})</span>` : ""}</span><span class="when">${shortDate(t.date)}</span><span class="subj">${esc(t.subject)}</span><span class="snip">${esc(t.snippet)}</span></button></li>`).join("")}</ul>`
+        : (S.settings.accounts.includes(S.settings.acct) ? setupCard(S.settings.acct) : `<div class="pad"><div class="empty">Nothing here.</div></div>`);
+      if (Mail.threads.length && S.settings.accounts.includes(S.settings.acct)) main += `<div class="pad hint">Showing mail sent to ${esc(S.settings.acct)}. <button class="btn ghost sm" data-act="setup">How this works</button></div>`;
