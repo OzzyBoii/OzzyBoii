@@ -1,0 +1,11 @@
+{
+  "name": "Ozzy OS",
+  "short_name": "Ozzy",
+  "description": "A voice-driven AI command center with mail, messages, notes and a focus timer.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#02070b",
+  "theme_color": "#02070b",
+  "icons": [{ "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

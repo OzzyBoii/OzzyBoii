@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#02070b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ozzy">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="apple-touch-icon" id="touchIcon" href="icons/icon.svg">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Ozzy OS</title>
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html,body{height:100%;margin:0;background:#02070b;color:#3fd8ff;font:14px ui-monospace,Menlo,monospace}[hidden]{display:none!important}#boot{height:100%;display:grid;place-items:center;letter-spacing:.3em}</style>
+</head>
+<body>
+<div id="boot">OZZY OS · BOOTING</div>
+<script>
+// Loads the app from src/parts, joined in order. build.sh joins the same parts for the Claude artifact.
+// iPhone home screen icons must be PNG, so the SVG icon is rasterized for the touch icon.
+(function () {
+  var img = new Image();
+  img.onload = function () { try { var c = document.createElement("canvas"); c.width = c.height = 180; c.getContext("2d").drawImage(img, 0, 0, 180, 180); document.getElementById("touchIcon").href = c.toDataURL("image/png"); } catch (e) {} };
+  img.src = "icons/icon.svg";
+  if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) navigator.serviceWorker.register("sw.js").catch(function () {});
+  var get = function (u) { return fetch(u).then(function (r) { if (!r.ok) throw new Error(r.status); return r; }); };
+  get("src/parts/parts.json").then(function (r) { return r.json(); }).then(function (names) {
+    return Promise.all(names.map(function (n) { return get("src/parts/" + n).then(function (r) { return r.text(); }); }));
+  }).then(function (chunks) {
+    var html = chunks.join("");
+    var head = document.head.innerHTML;
+    document.open();
+    document.write("<!doctype html><html lang=\"en\"><head>" + head + "</head><body>" + html + "</body></html>");
+    document.close();
+  }).catch(function () { document.getElementById("boot").textContent = "Couldn't load Ozzy OS. Check your connection and reload."; });
+})();
+</script>
+</body>
+</html>
