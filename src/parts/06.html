@@ -226,25 +226,3 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") $(".palette")?.remove();
 });
 
-/* ---------- Greeting on first interaction (audio needs a gesture) ---------- */
-let greeted = false;
-document.addEventListener("pointerdown", e => {
-  audio(); if (greeted) return; greeted = true;
-  resumeWake();
-  if (!S.settings.greet || e.target.closest("#micBig, #coreHit, #brand")) return;
-  sfx("boot");
-  setTimeout(() => {
-    if (speaking || listening || Ozzy.busy) return;
-    const mail = Mail.state === "ready" ? ` You have ${Mail.unread || "no"} unread email${Mail.unread === 1 ? "" : "s"}.` : "";
-    const line = `${partOfDay()}, ${addr()}. ${AN()} online.${mail} How may I help?`;
-    setCaption(line, ""); say(line);
-  }, 700);
-}, { capture: true });
-
-/* ---------- Boot ---------- */
-readColors(); applySettings(); renderHome(); renderDock(); renderTop(); tick(); Mic.check();
-setCaption(`${partOfDay()}, ${addr()}. Tap the core or the mic and speak, or type below.`, "");
-requestAnimationFrame(() => { drawWall(); setOrb(); requestAnimationFrame(loop); });
-document.fonts?.ready.then(() => drawWall());
-})();
-</script>
